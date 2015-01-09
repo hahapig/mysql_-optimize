@@ -1,0 +1,37 @@
+SELECT 
+        MAX(fur.ID) ID
+    FROM
+        User_Relation_Follow urf
+    INNER JOIN Forum_UserPost_Relation fur ON urf.FollowedUserID = fur.UserID
+    WHERE
+        urf.UserID = 236340 AND urf.ISValid = 1
+            AND fur.FromType IN (0 , 1, 2)
+            AND fur.ISValid = 1
+            AND fur.ID > 1 //这里就是优化增加的东西id偏移量
+    LIMIT 1
+    
+    
+    Forum_UserPost_Relation包含了UserID_index单列索引和主键.
+    
+    Forum_UserPost_Relation总数据量：1784811，
+    
+    
+    
+    下面的情况就比较复杂了：
+    
+    1.如果根据条件urf.UserID = x，查询的结果比较多（测试次条件结果集为：27781），那么，mysql宁愿走全表扫描，而不使用UserID_index单列索引
+    
+    2.如果根据条件urf.UserID = x，查询的结果比较少（测试次条件结果集为：1829），那么具备走UserID_index单列索引的条件。
+    
+     下面的选择是在条件2的前提下讨论的：
+     
+     在看 AND fur.ID > x ，对索引使用的影响，如果x值比较大（接近最大值），那么使用主键，反之，使用UserID_index单列索引。
+     
+     
+     
+  总之：主键索引在这里面使用，必须是基于单列索引无法获取小结果集时，被使用的。而要使用主键，必须给定一个较大值，或者UserID_index单列索引无法
+  筛选更多结果时。
+  
+  对于当前环境来说： fur.ID > x，此x具有大值，起到了优化作用，但从整体来看，只是对top10的用户增加id偏移量起到优化作用。其他大部分用户还是使用UserID_index单列索引查询数据
+    
+    
