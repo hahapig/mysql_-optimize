@@ -1,0 +1,2233 @@
+package com.yunyao.mocha.controllers;
+
+import com.yunyao.mocha.AppConstants;
+import com.yunyao.mocha.StatusCode;
+import com.yunyao.mocha.dao.forum.*;
+import com.yunyao.mocha.dao.front.AppDeviceDAO;
+import com.yunyao.mocha.dao.front.MochaLogDAO;
+import com.yunyao.mocha.dao.front.SearchKeyHistoryDAO;
+import com.yunyao.mocha.dao.product.ProductListDAO;
+import com.yunyao.mocha.dao.shop.ProductMappingDAO;
+import com.yunyao.mocha.dao.user.UserDAO;
+import com.yunyao.mocha.dao.user.UserRelationFollowDAO;
+import com.yunyao.mocha.model.MochaBillModel;
+import com.yunyao.mocha.model.TopDownModel;
+import com.yunyao.mocha.model.forum.FloorPicDataModel;
+import com.yunyao.mocha.model.forum.ForumUserPostRelationModel;
+import com.yunyao.mocha.model.forum.inparam.*;
+import com.yunyao.mocha.model.forum.post.*;
+import com.yunyao.mocha.model.forum.section.ForumSectionActiveModel;
+import com.yunyao.mocha.model.inparam.DeviceModel;
+import com.yunyao.mocha.model.shop.ProductShopModel;
+import com.yunyao.mocha.model.user.UserFollowListModel;
+import com.yunyao.mocha.model.user.UserForumPostAuthorModel;
+import com.yunyao.mocha.model.user.UserForumSectionModel;
+import com.yunyao.mocha.pojo.ForumSectionTag;
+import com.yunyao.mocha.pojo.MessageType;
+import com.yunyao.mocha.pojo.MochaStaticParam;
+import com.yunyao.mocha.pojo.forum.PostUserVote;
+import com.yunyao.mocha.pojo.temp.YoukuVideoContent;
+import com.yunyao.mocha.pojo.user.User;
+import com.yunyao.mocha.service.*;
+import com.yunyao.mocha.service.PrivilegeService.ActionType;
+import com.yunyao.mocha.service.SolrSearchService.SolrIndexType;
+import com.yunyao.mocha.util.*;
+import net.paoding.rose.web.Invocation;
+import net.paoding.rose.web.annotation.Param;
+import net.paoding.rose.web.annotation.Path;
+import net.paoding.rose.web.annotation.rest.Post;
+import org.apache.log4j.Logger;
+import org.json.JSONObject;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import java.util.*;
+
+/**
+ * 
+ * 论坛的帖子操作
+ * @author wangqingsong
+ *
+ */
+@AuthRequired
+@Path("/forum/post")
+public class ForumPostController {
+	
+	private static final int FLOOR_PAGE_ITEM_SIZE           = 20;
+	private static final int POSTOWNER_FLOOR_PAGE_ITEM_SIZE = 200;
+	private static final int FLOOR_REPLYS_QUERY_SIZE        = 100;
+	
+	private static final Logger appLog  = Log4jUtil.appLog;
+	private static final Logger pfmLog  = Log4jUtil.pfmLog;
+
+	@Autowired
+	private UserDAO userDAO;
+	@Autowired
+	private PostListDAO postDAO;
+	@Autowired
+	private PostListDataDAO postDataDAO;
+	@Autowired
+	private PostListFloorReplyDAO postFloorDAO;
+	@Autowired
+	private PostListFloorReplyDataDAO postFloorDataDAO;
+	@Autowired
+	private PostListFloorReplyReplyDAO postFloorReplyDAO;
+	@Autowired
+	private FloorReplyLikeActionDAO floorLikeActionDAO;
+	@Autowired
+	private MochaLogDAO mochaLogDAO;
+	@Autowired
+	private ProductListDAO productDAO;
+	@Autowired
+	private MessageService messageService;
+	@Autowired
+	private MochaBillService mochaBillService;
+	@Autowired
+	private PostListLikeActionDAO postLikeAction;
+	@Autowired
+	private PostListTagsRelationDAO postTagRelationDAO;
+	@Autowired
+	private ForumUserPostRelationDAO userPostRelationDAO;
+	@Autowired
+	private AppDeviceDAO appDeviceDAO;
+	@Autowired
+	private SectionDAO sectionDAO;
+	@Autowired
+	private SectionTagsDAO sectionTagsDAO;
+	@Autowired
+	private PostListCollectDAO postCollectDAO;
+	@Autowired
+	private PostListMochaValueDAO postMochaValueDAO;
+	@Autowired
+	private PostListCollectDAO postListCollectDAO;
+	@Autowired
+	private ProductMappingDAO productMappingDAO;
+    @Autowired
+    private UserRelationFollowDAO userRelationFollowDAO;
+	@Autowired
+	private PostListFloorReplyMochaValueDAO postFloorMochaValueDAO;
+	@Autowired
+	private ForumUserPostRelationDAO forumUserPostRelationDAO;
+    @Autowired
+    private SearchKeyHistoryDAO searchKeyHistoryDAO;
+	@Autowired
+	private ParamStaticService paramStaticService;
+	@Autowired
+	private YouKuVideoService youKuVideoService;
+	@Autowired
+	private SolrSearchService solrSearchService;
+	@Autowired
+	private PrivilegeService privilegeService;
+	@Autowired
+	private UserLevelTaskService userLevelTaskService;
+	@Autowired
+	private ForumAtSymbolDAO atSymbolDAO;
+	@Autowired
+	private PostListVoteDAO postVoteDAO;
+	@Autowired
+	private PostListVoteItemDAO postVoteItemDAO;
+	@Autowired
+	private PostListVoteUserDAO postVoteUserDAO;
+	@Autowired
+	private PostListVoteItemUserDAO postVoteItemUserDAO;
+	@Autowired
+	private PrivilegeLevelService privilegeLevelService;
+
+	/**
+	 * 返回新增的userID
+	 * @param preUserIDList
+	 * @param currentUserIDList
+	 * @return
+	 */
+	private List<Integer> diffUserIDList(List<Integer> preUserIDList,List<Integer> currentUserIDList){
+		List<Integer> resultList = new ArrayList<Integer>();
+		if(preUserIDList==null || preUserIDList.size()==0){
+			return currentUserIDList==null?resultList:currentUserIDList;
+		}
+		if(currentUserIDList == null){
+			return resultList;
+		}
+		for(Integer id : currentUserIDList) {
+			if(!preUserIDList.contains(id)){
+				resultList.add(id);
+			}
+		}
+		return resultList;
+	}
+
+	/**
+	 * 发送消息 －
+	 * @param authorUser
+	 * @param atUserIDList
+	 * @param dataID
+	 * @param floorIndex
+	 * @param title
+	 * @param messageType
+	 */
+	private void sendMsg(User authorUser,List<Integer> atUserIDList,int dataID,int floorIndex,
+						 String title,int messageType){
+		if(atUserIDList==null || atUserIDList.size()==0){
+			return;
+		}
+		List<User> users = userDAO.getUsersByID(atUserIDList);
+		if(users==null || users.size()==0){
+			return;
+		}
+		for(User user:users){
+			messageService.doPostAtUser(authorUser, user, dataID, floorIndex,title, messageType);
+		}
+	}
+
+	/**
+	 * 更新@关系
+	 * @param dataID 帖子或者回复的ID
+	 * @param ids 被@人的id列表
+	 * @param atType 参考AtSymbolRelation.AT_TYPE_POST常量
+	 */
+	private void updateAtRelation(int dataID,List<Integer> ids,int atType){
+		if(atType == AtUser.AT_TYPE_POST){
+			//如果是帖子的@关系
+			atSymbolDAO.deleteForPost(dataID);
+		}
+		if(atType == AtUser.AT_TYPE_REPLY){
+			//如果是回复的at关系
+			atSymbolDAO.deleteForPostReply(dataID);
+		}
+		addAtRelation(dataID,ids,atType);
+	}
+
+	/**
+	 * 增加@关系
+	 * @param dataID 帖子或者回复的ID
+	 * @param ids
+	 * @param atType
+	 */
+	private void addAtRelation(int dataID,List<Integer> ids,int atType){
+		if(ids==null || ids.size()==0){
+			return;
+		}
+		if(atType == AtUser.AT_TYPE_REPLY){
+			//插入发帖时的@关系
+			for(Integer id:ids){
+				atSymbolDAO.insertAtForPostReply(dataID,id);
+			}
+		}
+		if(atType == AtUser.AT_TYPE_POST){
+			//插入回复时@关系
+			for(Integer id:ids){
+				atSymbolDAO.insertAtForPost(dataID,id);
+			}
+		}
+	}
+
+	/***
+     * 论坛发布帖子;
+     */
+    @Post("write")
+    public Object write(final Invocation inv, @Param("data") final String data) {
+    	final int cur_uid;
+		final String accountId;
+		final PostWriteModel inModel;
+        try {
+        	// 1. 接收数据
+        	inModel = GSonUtil.getObjectFromJson(data, PostWriteModel.class);
+        	// 2. 验证参数的合法性;
+			if(inModel == null ){
+				appLog.error("forum/post/write, inModel is not validated.");
+				return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR);
+			}
+			// V3.1.0添加对内容进行关键字过滤
+			String filterContet = paramStaticService.getMochaStaticParam(MochaStaticParam.CONTENT_FILTER);
+			cur_uid = inModel.getCur_uid();
+			accountId = inModel.getAccountId();
+			appLog.info("forum/post/write, cur_uid:"+cur_uid);
+			String validateError = inModel.validateError(filterContet);
+			if(validateError!=null && validateError.length()>0){
+				appLog.error("forum/post/write, valiStr:"+validateError);
+				return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, validateError);
+			}
+			// 3. 判断用户的合法性;
+			User user = userDAO.getValidatedUser(cur_uid, accountId);
+			if( user==null || user.getIsTempUser()==1 ){
+				appLog.error("forum/post/write, user not validated cur_uid:"+cur_uid);
+				return RequestUtil.error(StatusCode.USER_NOT_FOUND);
+			} else if (user.getIsLocked()==1){
+    			appLog.error("forum/post/write, user locked:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_IS_LOCKED);
+    		}
+			// 3.1 判断用户的设备合法性;
+			Integer isValidObj = appDeviceDAO.getISValid(user.getDeviceID());
+			if(isValidObj==null || (isValidObj!=null && isValidObj.intValue()==0)){
+				appLog.warn("forum/post/write, device is locked:"+user.getDeviceID());
+				return RequestUtil.error(StatusCode.DEVICE_IS_LOCKED);
+			}
+			// 3.2 V2.3判断用户的发帖时间,限制在5分钟之内;
+			int writePostCount = postDAO.getUserPublishPostCount(cur_uid, 5);
+			if(writePostCount > 0){
+				appLog.warn("forum/post/write, return, getUserPublishPostCount:"+writePostCount);
+				return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, "您距上次发帖未过5分钟,请先休息一下吧");
+			}
+			// 3.3 V4.4.0添加, 官方板块只能小编才能发布帖子;
+			if(inModel.getSection_id()==9 && user.getRole()!=3){
+				appLog.warn("forum/post/write, section guanfang:"+user.getRole());
+				return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, "你不能官方板块发帖喔!");
+			}
+			// 4. 插入数据库;
+			appLog.info("forum/post/write, insert post for sectionID:"+inModel.getSection_id());
+			// V2.2优化: 在帖子中替换标题中间的换行成空格 标题前后空格去掉;
+			String postTitle = PublicUtil.getTrimIfNullValueBlank(
+					inModel.getTitle()).replace("\\r", " ").replace("\\n", " ");
+			//v4.5 增加，是否@了用户
+			int isAtUser = 0;
+			if(inModel.getAtUserIDList()!=null && inModel.getAtUserIDList().size()>0){
+				isAtUser = 1;
+				String validateInfo = privilegeLevelService.validate(user,PrivilegeLevelService.LevelActionType.Forum_AT_1);
+				if(validateInfo != null){
+					return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR,validateInfo);
+				}
+			}
+			int postID = postDAO.insert(postTitle, inModel.getContent(),
+					inModel.getSection_id(), inModel.getCur_uid(), 0, 0, 0, 0,isAtUser);
+			// 5. 循环插入帖子的妆品和图片数据;
+			int isProductIN = 0;
+			int isPicIN = 0;
+			int isPostIN = 0;
+			int isVideoIN = 0;
+			int isInsideVideoIn = 0;
+			int isVoteIn = 0;
+			List<PostPicInModel> picList = inModel.getPicList();
+			if(picList!=null && picList.size()>0){
+				int dataIndex = 0; /** 用于附件元素之间的顺序排序 **/
+				for(PostPicInModel picModel: picList){
+					if(picModel==null){
+						continue;
+					}
+					// 处理投票;
+					int postVoteID = 0;
+					if(picModel.getType() == 6){
+						PostVoteModel voteModel = picModel.getVote();
+						if(voteModel==null || voteModel.getItemList()==null || voteModel.getItemList().size()==0){
+							continue;
+						}
+						postVoteID = postVoteDAO.insert(voteModel.getTitle(), postID, voteModel.getVoteType());
+						int voteDataIndex = 0;
+						for(PostVoteItemModel voteItem: voteModel.getItemList()){
+							postVoteItemDAO.insert(voteItem.getName(), ++voteDataIndex, postVoteID);
+						}
+					}
+					dataIndex ++;
+					// 防止用户某个妆品或者图片上传,没有按照规矩插入表格,不影响插入其他的妆品或者图片.
+					boolean isException = false;
+					try{
+						postDataDAO.insert(picModel.getContent(), 
+								picModel.getType(), picModel.getPostid(), picModel.getPid(),
+								picModel.getPicUrl(), picModel.getVideoType(), 
+								picModel.getVideoID(), picModel.getVideoHDType(),
+								picModel.getVideoTitle(), picModel.getVideoPic(), 
+								picModel.getVideoPageUrl(), postID, picModel.getInsideVideoID(), postVoteID,
+								dataIndex);
+					} catch (Exception exp){
+						isException = true;
+						exp.printStackTrace();
+			        	Log4jUtil.exception(exp);
+					}
+					if(isException){
+						continue;
+					}
+					// 防止用户某个妆品或者图片上传,没有按照规矩插入表格,不影响插入其他的妆品或者图片.
+					// picModel.getType(): 1为妆品, 2为图片;
+					if(picModel.getType()==1 && picModel.getPid()>0){
+						isProductIN = 1;
+					} else if (picModel.getType()==2 && picModel.getPicUrl()!=null 
+							&& picModel.getPicUrl().trim().length()>0){
+						isPicIN = 1;
+					} else if (picModel.getType()==3 && picModel.getPostid()>0){
+						isPostIN = 1;
+					} else if (picModel.getType()==4 && picModel.getVideoPageUrl()!=null
+							&& picModel.getVideoPageUrl().trim().length()>0){
+						isVideoIN = 1;
+					} else if (picModel.getType()==5 && picModel.getInsideVideoID()!=0){
+						isInsideVideoIn = 1;
+					} else if (picModel.getType()==6 && picModel.getVote()!=null
+							&& picModel.getVote().getItemList().size()>0){
+						isVoteIn = 1;
+					}
+				}
+				appLog.info("forum/post/write, insert picList.size():"+picList.size());
+			}
+			// 6. 更新插入的帖子是否有图片;是否有妆品的标记;
+			appLog.info("forum/post/write, isProductIN:"+isProductIN+",isPicIN:"+isPicIN
+					+",isPostIN:"+isPostIN+",isVideoIN:"
+					+isVideoIN+",insideVideoID:"+isInsideVideoIn);
+			postDAO.updateProductInPicInPostInVideoIn(isProductIN, isPicIN, isPostIN, isVideoIN, isInsideVideoIn, isVoteIn, postID);
+			// 7. V2.1 新增需求, 循环处理帖子的TagList;
+			List<Integer> tagIDList = inModel.getTagList();
+			if(tagIDList==null || tagIDList.size()==0){
+				appLog.warn("forum/post/write, tagIDList is null.");
+			} else {
+				appLog.info("forum/post/write, tagIDList not null, insert tag & post relation.");
+				for(Integer tagID: tagIDList){
+					if(tagID!=null && tagID.intValue()>0){
+						try{
+							postTagRelationDAO.insert(tagID, postID, inModel.getSection_id());
+						} catch (Exception exp){
+							exp.printStackTrace();
+							Log4jUtil.exception(exp);
+						}
+					}
+				}
+			}
+			// 7.2 V2.2 新增把发布帖子写入表forum_userpost_relation; 粉丝可以看到动态;
+			//v4.6增加 @功能
+			addAtRelation(postID,inModel.getAtUserIDList(), AtUser.AT_TYPE_POST);
+			String resolvedContent = AppUtil.resolveAtSymbol(inModel.getContent(),atSymbolDAO.getAllForPost(postID),true);
+			inModel.setContent(resolvedContent);//为下一步的粉丝动态信息，设置解析后的content
+			List<String> picUrlList = postDataDAO.getPostPicUrlList(postID, 4,
+					AppConstants.PIC_PRODUCT_DEFAULT, AppConstants.PIC_VIDEO_DEFAULT);
+			appLog.info("forum/post/write, dongtaiPicUrlList size():"+picUrlList.size());
+			String insertPicUrls = ForumSectionActiveModel.getInsertPicUrls(picUrlList);
+			userPostRelationDAO.insert(cur_uid, postID, 0, inModel.getTitle(),
+					inModel.getInsertRelationContent(), insertPicUrls, ForumUserPostRelationModel.TYPE_WRITE_POST, 1);
+			appLog.info("forum/post/write, userPostRelationDAO.insert succ.");
+			// 8. 处理抹茶币;
+			MochaBillModel mochaBill = mochaBillService.getMochaBill(user, 
+					AppConstants.MochaValueType.FORUM_POST_WRITE);
+			// 9. 处理返回中的列表状态下的帖子信息;
+			PostWriteRetModel retModel = new PostWriteRetModel();
+			retModel.setMochaBill(mochaBill);
+			PostListModel postListModel = postDAO.getListModel(postID);
+			UserForumSectionModel postAuthUser = userDAO.getForumAuthorUser(postListModel.getAuthorUserID());
+			postListModel.setAuthorUser(postAuthUser);
+			postListModel.setChangeUserName(postAuthUser.getUserName());
+			retModel.setListPost(postListModel);
+    		// 10.更新solr索引
+    		SolrSearchService.buildIndex(SolrIndexType.POST, true);
+    		appLog.info("forum/post/write, end seccess postID:"+postID);
+    		userLevelTaskService.registerTask(AppConstants.UserLevelTaskType.POST_PUBLISH, cur_uid);
+			//11 v4.6 @时，需要发送消息提醒
+			sendMsg(user,inModel.getAtUserIDList(),postID,0,
+					postListModel.getTitle(), MessageType.AT_POST);
+			return RequestUtil.succ(retModel);
+        } catch (Exception exp){
+        	exp.printStackTrace();
+        	Log4jUtil.exception(exp);
+        }
+        return RequestUtil.error(StatusCode.INTERNET_BUSY);
+    }
+    
+	/***
+     * 论坛更新帖子;
+     */
+    @Post("update")
+    public Object update(final Invocation inv, @Param("data") final String data) {
+    	final int cur_uid;
+		final String accountId;
+		final PostUpdateModel upModel;
+        try {
+        	// 1. 接收数据
+        	upModel = GSonUtil.getObjectFromJson(data, PostUpdateModel.class);
+        	// 2. 验证参数的合法性;
+			if(upModel == null){
+				appLog.error("forum/post/update, inModel is not validated.");
+				return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR);
+			}
+			// V3.1.0添加对内容进行关键字过滤
+			String filterContet = paramStaticService.getMochaStaticParam(MochaStaticParam.CONTENT_FILTER);
+			String validError = upModel.validateError(filterContet);
+			if(validError!=null && validError.length()>0){
+				appLog.error("forum/post/update, validError:"+validError);
+				return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, validError);
+			}
+			cur_uid = upModel.getCur_uid();
+			accountId = upModel.getAccountId();
+			appLog.info("forum/post/update, cur_uid:"+cur_uid);
+			// 3. 判断用户的合法性;
+			User user = userDAO.getValidatedUser(cur_uid, accountId);
+			if( user==null || user.getIsTempUser()==1 ){
+				appLog.error("forum/post/update, user not validated cur_uid:"+cur_uid);
+				return RequestUtil.error(StatusCode.USER_NOT_FOUND);
+			} else if (user.getIsLocked()==1){
+				appLog.error("forum/post/update, user locked:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_IS_LOCKED);
+    		}
+		    // 3.1 判断用户的设备合法性;
+			Integer isValidObj = appDeviceDAO.getISValid(user.getDeviceID());
+			if(isValidObj==null || (isValidObj!=null && isValidObj.intValue()==0)){
+				appLog.warn("forum/post/update, device is locked:"+user.getDeviceID());
+				return RequestUtil.error(StatusCode.DEVICE_IS_LOCKED);
+			}
+			PostInfoModel postInfo = this.postDAO.getInfo(upModel.getPostId());
+			// 4. 错误返回, 帖子不存在, 用户权限不够;
+			if(postInfo == null){
+				appLog.error("forum/post/update, post not found:" + upModel.getPostId());
+				return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND);
+			} 
+			// 4.0 V3.0.0添加判断帖子的锁定状态;
+			if(postInfo.getIsLocked() == 1){
+				appLog.warn("forum/post/update, post islocked:" + upModel.getPostId());
+				return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, "此贴已经锁定！");
+			}
+			// 4.1 必须为管理员和帖子的作者才能对帖子进行修改.
+			if(cur_uid != postInfo.getAuthorUserID()){
+				// V4.0.0 启用新的权限规则控制20140822
+				String errorString = privilegeService.validate(user, ActionType.ForumSection_2);
+				if(errorString!=null && errorString.trim().length()>0){
+					appLog.warn("forum/post/update, errorString:" + errorString);
+					return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, errorString);
+				} 
+				mochaLogDAO.insert("forum_postlist", upModel.getPostId(), cur_uid, "update info");
+			}
+			//v4.6 增加，是否@了用户
+			int isAtUser = 0;
+			if(upModel.getAtUserIDList()!=null && upModel.getAtUserIDList().size()>0){
+				isAtUser = 1;
+				String validateInfo = privilegeLevelService.validate(user,PrivilegeLevelService.LevelActionType.Forum_AT_1);
+				if(validateInfo != null){
+					return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR,validateInfo);
+				}
+			}
+			// 5. 插入数据库;
+			PostUpdateRetModel retModel = new PostUpdateRetModel();
+			// 6. 循环插入帖子的妆品和图片数据;
+			int isProductIN = 0;
+			int isPicIN = 0;
+			int isPostIN = 0;
+			int isVideoIN = 0;
+			int isInsideVideoIn = 0;
+			int isVoteIn = 0;
+			List<PostPicUpdateModel> picList = upModel.getPicList();
+			// 7.先将之前所有数据变为不启用
+			postDataDAO.updateISNotValid(upModel.getPostId());
+			if(picList!=null && picList.size()>0){
+				int dataIndex = 0;
+				for(PostPicUpdateModel picModel: picList){
+					if(picModel==null){
+						continue;
+					}
+					dataIndex ++;
+					if(picModel.getId()!=0){
+						int postVoteID = 0;  // 投票ID
+						if(picModel.getVote()!=null && picModel.getVote().getId()>0){
+							postVoteID = picModel.getVote().getId();
+						}
+						// 为更新
+						postDataDAO.update(picModel.getContent(), picModel.getType(), 
+								picModel.getPostid(), picModel.getPid(),
+								picModel.getPicUrl(), picModel.getVideoType(), 
+								picModel.getVideoID(), picModel.getVideoHDType(),
+								picModel.getVideoTitle(), picModel.getVideoPic(),
+								picModel.getVideoPageUrl(), picModel.getInsideVideoID(),
+								postVoteID, dataIndex, picModel.getId(), upModel.getPostId());
+						// 2014-05-14, 暂时屏蔽下面的代码; 投票中的附件暂时不能进行更新;
+//						if(picModel.getType() == 6){
+//							// 对投票的附件额外的更新;
+//							if(postVoteID <= 0){
+//								appLog.error("forum/post/update, update logic error, type=6, postVoteID:"+postVoteID);
+//								continue;
+//							}
+//							PostVoteModel voteModel = picModel.getVote();
+//							if(voteModel==null || voteModel.getItemList()==null || voteModel.getItemList().size()==0){
+//								continue;
+//							}
+//							// 投票中的附件更新;
+//							postVoteDAO.updateData(voteModel.getId(), upModel.getPostId(), voteModel.getTitle(), voteModel.getVoteType());
+//							postVoteItemDAO.updateAllNotValid(postVoteID);
+//							int voteDataIndex = 0;
+//							for(PostVoteItemModel voteItem: voteModel.getItemList()){
+//								if(voteItem.getId() <= 0){
+//									postVoteItemDAO.insert(voteItem.getName(), ++voteDataIndex, postVoteID);
+//								} else {
+//									postVoteItemDAO.update(voteItem.getId(), postVoteID, ++voteDataIndex, voteItem.getName());
+//								}
+//							}
+//						}
+					} else {
+						// 为新增
+						int postVoteID = 0;
+						if(picModel.getType() == 6){
+							PostVoteModel voteModel = picModel.getVote();
+							if(voteModel==null || voteModel.getItemList()==null || voteModel.getItemList().size()==0){
+								appLog.error("forum/post/update, insert logic error, type=6, postVoteID:"+postVoteID);
+								continue;
+							}
+							postVoteID = postVoteDAO.insert(voteModel.getTitle(), upModel.getPostId(), voteModel.getVoteType());
+							int voteDataIndex = 0;
+							for(PostVoteItemModel voteItem: voteModel.getItemList()){
+								postVoteItemDAO.insert(voteItem.getName(), ++voteDataIndex, postVoteID);
+							}
+						}
+						postDataDAO.insert(picModel.getContent(), picModel.getType(), 
+								picModel.getPostid(), picModel.getPid(),
+								picModel.getPicUrl(),  picModel.getVideoType(), 
+								picModel.getVideoID(), picModel.getVideoHDType(),
+								picModel.getVideoTitle(), picModel.getVideoPic(), 
+								picModel.getVideoPageUrl(), upModel.getPostId(), 
+								picModel.getInsideVideoID(), postVoteID, dataIndex);
+					}
+					// picModel.getType(): 1为妆品, 2为图片;
+					if(picModel.getType()==1 && picModel.getPid()>0){
+						isProductIN = 1;
+					} else if (picModel.getType()==2 && picModel.getPicUrl()!=null 
+							&& picModel.getPicUrl().trim().length()>0){
+						isPicIN = 1;
+					} else if (picModel.getType()==3 && picModel.getPostid()>0){
+						isPostIN = 1;
+					} else if (picModel.getType()==4 && picModel.getVideoPageUrl()!=null
+							&& picModel.getVideoPageUrl().trim().length()>0){
+						isVideoIN = 1;
+					} else if (picModel.getType()==5 && picModel.getInsideVideoID()!=0){
+						isInsideVideoIn = 1;
+					} else if (picModel.getType()==6 && picModel.getVote()!=null
+							&& picModel.getVote().getItemList().size()>0){
+						isVoteIn = 1;
+					}
+				}
+				appLog.info("forum/post/update, update picList.size():"+picList.size());
+			}
+			appLog.info("forum/post/update, isProductIN:"+isProductIN+",isPicIN:"+isPicIN+",isPostIN:"+isPostIN+",isVideoIN:"+isVideoIN);
+			// 8. V2.1 新增需求, 循环处理帖子的TagList;
+			List<Integer> tagIDList = upModel.getTagList();
+			// 9. 先将之前的Tag全部删除
+			postTagRelationDAO.deletePostTag(upModel.getPostId());
+			if(tagIDList==null || tagIDList.size()==0){
+				appLog.warn("forum/post/update, tagIDList is null.");
+			} else {
+				appLog.info("forum/post/update, tagIDList not null, insert tag & post relation.");
+				for(Integer tagID: tagIDList){
+					if(tagID!=null && tagID.intValue()>0){
+						try{
+							postTagRelationDAO.insert(tagID, upModel.getPostId(), upModel.getSection_id());
+						} catch (Exception exp){
+							exp.printStackTrace();
+							Log4jUtil.exception(exp);
+						}
+					}
+				}
+			}
+			// 10. 更新插入的帖子是否有图片;是否有妆品的标记;及其他内容
+			postDAO.update(upModel.getTitle(), upModel.getContent(), isProductIN,
+					isPicIN, isPostIN, isVideoIN, isInsideVideoIn, isVoteIn, isAtUser,
+					upModel.getSection_id(), upModel.getPostId());
+    		appLog.info("forum/post/update, end seccess postID:"+retModel.getPost_id());
+    		retModel.setPost_id(upModel.getPostId());
+    		// 11. V2.2 新增需求;
+    		// 在管理员调整完某个帖子的版块后，发消息给用户，提醒以后发送内容到指定的版块，否则可能被扣除抹茶币。
+    		if(postInfo.getSectionID() != upModel.getSection_id()){
+    			User postAuthUser = userDAO.getUser(postInfo.getAuthorUserID());
+    			String beforeSecName = sectionDAO.getSectionName(postInfo.getSectionID());
+    			String afterSecName = sectionDAO.getSectionName(upModel.getSection_id());
+    			String tagName = null;
+    			if(upModel.getTagList()!=null && upModel.getTagList().size()>0){
+    				tagName = sectionTagsDAO.getTagName(upModel.getTagList().get(0));
+    			}
+    			boolean status = messageService.doPostSectionUpdated(postAuthUser, 
+    					postInfo.getId(), beforeSecName, afterSecName, tagName);
+    			appLog.info("forum/post/update, send msg to postAuthUser, status:"+status);
+    		}
+    		// 12. 更新solr索引
+    		SolrSearchService.buildIndex(SolrIndexType.POST, true);
+			//13.  v4.6增加 @功能
+			updateAtRelation(upModel.getPostId(), upModel.getAtUserIDList(), AtUser.AT_TYPE_POST);
+			List<Integer> needMsg = diffUserIDList(upModel.getPreAtUserIDList(),upModel.getAtUserIDList());
+			sendMsg(user,needMsg,upModel.getPostId(),0,upModel.getTitle(), MessageType.AT_POST);
+    		return RequestUtil.succ(retModel);
+        } catch (Exception exp){
+        	exp.printStackTrace();
+        	Log4jUtil.exception(exp);
+        }
+        return RequestUtil.error(StatusCode.INTERNET_BUSY);
+    }
+    
+    /***
+     * 请求论坛板块帖子的详情信息;
+     * {"post_id", 1, "cur_uid": 70402, "accountId":"1272239025", "floorIndex":12}
+     * post_id为正数: 帖子ID.
+     * 2013-12-26 加入楼层定位,floorIndex>0,为开启楼层定位,将该楼提到最前面，然后1楼2楼
+     */
+    @Post("info")
+    public Object info(final Invocation inv, @Param("data") final String data, 
+    		@Param("device") final String device) {
+    	final int cur_uid;
+    	final int post_id;
+		@SuppressWarnings("unused")
+		final String accountId;
+		// 新增,可无
+		final int floorIndex;
+        try {
+        	// 1. 接收数据
+			final JSONObject json = new JSONObject(data);
+			cur_uid = json.optInt("cur_uid");
+			accountId = json.optString("accountId");
+			post_id = json.optInt("post_id");
+			floorIndex = json.optInt("floorIndex");
+			appLog.info("forum/post/info, cur_uid:"+cur_uid+", post_id:"+post_id+", floorIndex:"+floorIndex);
+			// 2. 验证参数的合法性;
+			if(post_id<=0 || floorIndex<0){ 
+				appLog.error("forum/post/info, post_id=0 or floorIndex=0.");
+				return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND);
+			}
+			DeviceModel deviceModel = GSonUtil.getObjectFromJson(device, DeviceModel.class);
+			final double version = AppUtil.getAppVersion(deviceModel);
+			final String versionString = deviceModel.getApp_ver();
+			appLog.info("forum/post/info, version:" + version);
+			// 3. 查询帖子是否存在;
+			long time1 = System.currentTimeMillis();
+			PostInfoModel postInfoModel = postDAO.getInfo(post_id);
+			if(postInfoModel == null){
+				appLog.error("forum/post/info, post not found:" + post_id);
+				return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND);
+			}
+			// 3.1 判断制定的楼层是否存在;
+			PostFloorModel firstFloor = null;
+			if(floorIndex > 0){
+				firstFloor = postFloorDAO.getFloorIndexInfo(post_id, floorIndex);
+				if(firstFloor==null || firstFloor.getIsBlocked()==1 || firstFloor.getId()<=0){
+					appLog.warn("forum/post/info, floorIndex is not valid or blocked.");
+					return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND, "指定的楼层不存在或已被屏蔽!");
+				}
+			}
+			// 4. 增加帖子的浏览量和浏览量达到1000和10000发消息提醒楼主;
+			postDAO.increaseVisitCount(post_id);
+			int visitCount = postInfoModel.getVisitCount();
+			if(visitCount==1000 || visitCount==10000){
+				User postAuthorUser = userDAO.getUser(postInfoModel.getAuthorUserID());
+				appLog.info("forum/post/info, visitCount:"+visitCount);
+				// #### 这里做一个逻辑: 此类抹茶币每天次数有上限,发消息前判断抹茶币是否返回正确!!
+				if(visitCount==1000){
+					MochaBillModel mochaBill = mochaBillService.getMochaBill(postAuthorUser, 
+							AppConstants.MochaValueType.FORUM_POST_VISITCOUNT_1000);
+					if(mochaBill != null){
+						int mochaValue = mochaBill.getActionValue();
+						boolean flag = messageService.doPostViewNum(postAuthorUser, post_id, visitCount, 
+								mochaValue, "好厉害", postInfoModel.getTitle());
+						appLog.info("forum/post/info, postAuthorUser getMochaValue:"+mochaValue+",sendMessage:"+flag);
+					}
+				} else if (visitCount==10000){
+					MochaBillModel mochaBill = mochaBillService.getMochaBill(postAuthorUser, 
+							AppConstants.MochaValueType.FORUM_POST_VISITCOUNT_10000);
+					if(mochaBill != null){
+						int mochaValue = mochaBill.getActionValue();
+						boolean flag = messageService.doPostViewNum(postAuthorUser, post_id, visitCount, 
+								mochaValue, "天呐", postInfoModel.getTitle());
+						appLog.info("forum/post/info, postAuthorUser getMochaValue:"+mochaValue+",sendMessage:"+flag);
+					}
+				}
+			}
+			// 5. 处理帖子的全部附属数据;只查询帖子中的数据;
+			// 5.1 处理帖子的作者;
+			UserForumPostAuthorModel authorUser = userDAO.getForumPost(postInfoModel.getAuthorUserID());
+			// 设置我是否关注楼主;
+			if(version>=4.3 && cur_uid>0 && postInfoModel.getAuthorUserID()!=cur_uid){
+				boolean isIfollowHim = userRelationFollowDAO.isFollow(cur_uid, postInfoModel.getAuthorUserID());
+				boolean isHimfollowME = userRelationFollowDAO.isFollow(postInfoModel.getAuthorUserID(), cur_uid);
+				authorUser.setFollowType(UserFollowListModel.getFollowType(isIfollowHim, isHimfollowME));
+			}
+			postInfoModel.setAuthorUser(authorUser);
+			// 5.2 查询帖子的附件!
+			List<PostPicDataModel> picDataList = new ArrayList<PostPicDataModel>();
+			List<Integer> sourceTypes = getAllSourceType(postInfoModel, version);
+			for(Integer type : sourceTypes) {
+				List<PostPicDataModel> tempDataList = getPostDataList(type, postInfoModel.getId(), cur_uid, version);
+				if(tempDataList==null || tempDataList.size()==0){
+					continue;
+				}
+				//V3.0.0添加,查询出妆品中的shopList;
+				if(type==1 && version>=3.0){
+					for(PostPicDataModel postDataModel: tempDataList){
+						if( postDataModel.getProductID()>0 && postDataModel.getIsMatchShop()==1){
+							postDataModel.setShopList(productMappingDAO.getShopList(postDataModel.getProductID()));
+						}
+					}
+				}
+				//处理视频附件
+				if(type == 4){
+					for(PostPicDataModel postPicDataModel : tempDataList) {
+						if( postPicDataModel.getVideoType()==1 
+								&& postPicDataModel.getVideoID()!=null
+								&& postPicDataModel.getVideoID().trim().length()>0
+								&& (postPicDataModel.getVideoID2()==null /*第二次就不会执行,直接从数据库获取VideoID2*/
+										|| postPicDataModel.getVideoID2().trim().length()==0)){
+							YoukuVideoContent videoContent = youKuVideoService.updatePost(postPicDataModel.getVideoID(), postPicDataModel.getId());
+							postPicDataModel.setVideoViewUrl(videoContent);
+						}
+						/****
+						 * 2014-07-03
+						 * IOS不能播放优酷的视频,VideoViewUrl直接返回VideoPageUrl
+						 * 后面BUG解决,新版本发布后, 注释下面整个IF的代码;
+						 */
+						if(postPicDataModel.getVideoType()==1 
+								&& versionString!=null && versionString.compareTo("3.2.1")<0
+								&& (AppUtil.getAppPlatform(device)==1 || AppUtil.getAppPlatform(device)==3)){ 
+							postPicDataModel.setVideoViewUrl(postPicDataModel.getVideoPageUrl());
+						}
+					}
+				}
+				picDataList.addAll(tempDataList);
+			}
+			Collections.sort(picDataList);
+			postInfoModel.setPicDataList(picDataList.size() == 0 ? null : picDataList);
+			// 5.3 V2.3新增处理抹茶币列表;
+			if(postInfoModel.getIsMochaValueChange() == 1){
+				List<PostMochaValueModel> mochaValueList = postMochaValueDAO.getMochaValueList(post_id);
+				postInfoModel.setMochaValueList(mochaValueList);
+			}
+			// 5.4 我是否顶过该帖子; V2.3 新增我是否收藏过此帖子; 
+			if(cur_uid > 0){
+				// isIToped
+				Integer isIToped = postLikeAction.getIfLike(post_id, cur_uid);
+				if(isIToped!=null && isIToped.intValue()>0){
+					postInfoModel.setIToped(true);
+				} 
+				// isICollected
+				boolean isICollected = postListCollectDAO.getIfCollected(cur_uid, post_id);
+				postInfoModel.setICollected(isICollected);
+			}
+			// 5.5 查询该帖子的tag信息;
+			ForumSectionTag tagInfo = postTagRelationDAO.getTagInfo(post_id);
+			if(tagInfo!=null && tagInfo.getId()>0){
+				postInfoModel.setTagID(tagInfo.getId());
+				postInfoModel.setTagName(tagInfo.getTagName());
+			}
+			//5.6 V4.6新增需求，增加是否@某个用户
+			if(postInfoModel.getIsAtUser()>0){
+				List<AtUser> users = atSymbolDAO.getAllForPost(postInfoModel.getId());
+				if(version >= 4.6){
+					postInfoModel.setAtUserList(users);
+				}else {
+					String resovledContent = AppUtil.resolveAtSymbol(postInfoModel.getContent(), users, false);
+					postInfoModel.setContent(resovledContent);
+				}
+			}
+			long time2 = System.currentTimeMillis();
+			appLog.info("forum/post/info, get postInfo and postAddInfo take MS:"+(time2-time1));
+			/**
+			 * 6. 如果帖子的楼层数目为0, 返回;
+			 *    以上查询帖子的详细信息(除开楼层)完毕;
+			 */
+			if(postInfoModel.getFloorCount() == 0){
+				postInfoModel.setFloorList(null);
+				postInfoModel.setLastFloor(null);
+				postInfoModel.setMoreFloorCount(0);
+				appLog.info("forum/post/info, floorCount=0,return, take MS:"+(time2-time1));
+				return RequestUtil.succ(version, postInfoModel);
+			}
+			// 7. 查询楼层的floorList;
+			// 在查询下面的楼层时, 去掉目标楼层, 后面翻页时可以显示目标楼层(防止只有几楼的情况下定位目标楼层很"重复")
+			List<PostFloorModel> floorList = postFloorDAO.getFloorInfoPage(post_id, floorIndex, 0, FLOOR_PAGE_ITEM_SIZE);
+			// 8. 计算moreFloorCount; V4.3.0中去掉此部分;
+			int maxFloorIndex = PostFloorModel.getMaxFloorIndex(floorList);
+			if(version < 4.3){
+				int moreFloorCount = postFloorDAO.getMoreFloorCount(post_id, maxFloorIndex, postInfoModel.getFloorCount());
+				postInfoModel.setMoreFloorCount(moreFloorCount);
+			}
+			// 9. 计算最后一楼;
+			if(floorList!=null && floorList.size()==FLOOR_PAGE_ITEM_SIZE 
+					&& maxFloorIndex<postInfoModel.getFloorCount()
+					&& version < 4.3  /**V4.3不反回最后一楼**/ ){
+				PostFloorModel lastFloor = postFloorDAO.getFloorIndexInfo(post_id, postInfoModel.getFloorCount());
+				if(lastFloor.getIsBlocked() == 1){
+					// 如果客户端的版本是2.3以下,最后一楼被屏蔽,则还是显示最后一楼;
+					// 原因是Android是根据是否有最后一楼的数据来显示加载更多的;
+					// 始终返回最后一楼, 否则在"加载更多"向上翻页时,取不到downFloorIndex; 2014-02-20;
+					lastFloor.setContent(AppConstants.BLOCK_FLOOR_CONTENT);
+				}
+				appLog.info("forum/post/info, setMoreFloorCount:"+postInfoModel.getMoreFloorCount());
+				// A. 查询最后一楼楼层的妆品和图片;(楼层如果已经被锁则不查询回复的附件)
+				hanleFloorAttachment(lastFloor, true, version, versionString, device);
+				// B. 查询最后一楼楼层每个用户的回复数据;
+				if(lastFloor.getIsOtherReplied() == 1){
+					List<PostFloorReplyModel> floorReplyList = postFloorReplyDAO.getFloorReplies(
+							lastFloor.getId(), 0, FLOOR_REPLYS_QUERY_SIZE);
+					lastFloor.setReplyList(floorReplyList);
+				}
+				// C. V2.3新增; 查询楼层的抹茶币奖励;
+				if(lastFloor.getIsMochaValueChange() == 1){
+					List<PostFloorMochaValueModel> floorMVList = postFloorMochaValueDAO.getMochaValueList(lastFloor.getId());
+					lastFloor.setMochaValueList(floorMVList);
+				}
+				// D. 查询当前用户是否顶过该楼层;
+				if(cur_uid > 0){
+					Integer floorReplyID = floorLikeActionDAO.getIfILiked(lastFloor.getId(), cur_uid);
+					if(floorReplyID!=null && floorReplyID.intValue()>0){
+						lastFloor.setIToped(true);
+					}
+				}
+				//v4.6 新增@功能
+				if(lastFloor.getIsAtUser() >= 0){
+					List<AtUser> users = atSymbolDAO.getAllForPostReply(lastFloor.getId());
+					if(version >= 4.6){
+						lastFloor.setAtUserList(users);
+					}else {
+						String resolvedContent = AppUtil.resolveAtSymbol(lastFloor.getContent(), users, false);
+						lastFloor.setContent(resolvedContent);
+					}
+				}
+				postInfoModel.setLastFloor(lastFloor);
+				appLog.info("forum/post/info, lastFloor PicDataList/ReplyList/isIToped query success.");
+			}
+			// 10. 把目标楼层提升至第一楼;
+			if(floorIndex>0 && firstFloor!=null){
+				if(floorList == null){
+					floorList = new ArrayList<PostFloorModel>();
+				}
+				floorList.add(0, firstFloor);
+			}
+			// 11. 处理楼层的全部数据(回复和被回复数据,楼层的妆品,楼层我的赞); 
+			//     循环查询floorList(包含目标楼层)中每层楼的全部数据;
+			if(floorList!=null && floorList.size()>0){
+				appLog.info("forum/post/info, get PicOrProductData,FloorReplies start.");
+				long time4 = System.currentTimeMillis();
+				// floorReplyIDList为了一次性查询我是否顶过该楼层;
+				List<Integer> floorReplyIDList = PostFloorModel.getIDList(floorList);
+				List<Integer> floorLikeList = null;
+				if(cur_uid > 0){
+					floorLikeList = floorLikeActionDAO.getIfILiked(cur_uid, floorReplyIDList);
+				}
+				// 查询每个楼层的妆品和回复数据;并判断该楼是否已被屏蔽
+				for(PostFloorModel floormodel: floorList){
+					int floorReplyID = floormodel.getId();
+					// A. 查询每个楼层的妆品和图片;
+					hanleFloorAttachment(floormodel, false, version, versionString, device);
+					//奇怪，原始代码这里被锁定的楼层依旧查询附件
+					// B. 查询单独楼层中的每个用户的回复数据;
+					if(floormodel.getIsOtherReplied()==1){
+						List<PostFloorReplyModel> floorReplyList = postFloorReplyDAO.getFloorReplies(
+								floorReplyID, 0, FLOOR_REPLYS_QUERY_SIZE);
+						floormodel.setReplyList(floorReplyList);
+					}
+					// C. 查询我是否顶过该楼层;
+					if(floorLikeList!=null && floorLikeList.contains(floorReplyID)){
+						floormodel.setIToped(true);
+					}
+					// D. V2.3新增; 查询楼层的抹茶币奖励;
+					if(floormodel.getIsMochaValueChange() == 1){
+						List<PostFloorMochaValueModel> floorMVList = postFloorMochaValueDAO.getMochaValueList(floormodel.getId());
+						floormodel.setMochaValueList(floorMVList);
+					}
+					//v4.6 新增@功能
+					if(floormodel.getIsAtUser() >= 0){
+						List<AtUser> users = atSymbolDAO.getAllForPostReply(floormodel.getId());
+						if(version >= 4.6){
+							floormodel.setAtUserList(users);
+						}else {
+							String resolvedContent = AppUtil.resolveAtSymbol(floormodel.getContent(), users, false);
+							floormodel.setContent(resolvedContent);
+						}
+					}
+				}
+				long time5= System.currentTimeMillis();
+				pfmLog.info("forum/post/info, get floor_add info success. takes MS:"+(time5-time4));
+				appLog.info("forum/post/info, get floor_add info success. takes MS:"+(time5-time4));
+			} 
+			// 12. 设置最后的楼层全部数据;
+			postInfoModel.setFloorList(floorList);
+			long time6 = System.currentTimeMillis();
+			pfmLog.info("forum/post/info, query floor all MS:"+(time6-time2));
+			long time7 = System.currentTimeMillis();
+			pfmLog.info("forum/post/info, succ all MS:"+(time7-time1));
+			appLog.info("forum/post/info, succ return post_id:" + post_id + ", versionNo:" + version);
+    		return RequestUtil.succ(version, postInfoModel);
+        } catch (Exception exp){
+        	exp.printStackTrace();
+        	Log4jUtil.exception(exp);
+        }
+        return RequestUtil.error(StatusCode.INTERNET_BUSY);
+    }
+    
+    /**
+     * 帖子投票接口;
+     * {"cur_uid":70402, "accountId":"1272239025", "postID":908514, "voteID":908514, "itemIDList":[1,23,4]}
+     * @since 4.6
+     */
+    @Post("vote")
+    public Object vote(final Invocation inv, @Param("data") final String data){
+    	final int cur_uid;
+    	final int postID;
+    	final int voteID;
+    	final String accountId;
+    	final List<Integer> itemIDList;
+    	final PostVoteInModel inModel;
+    	try{
+    		// 1. 接收数据
+    		inModel = GSonUtil.getObjectFromJson(data, PostVoteInModel.class);
+    		if(inModel == null){
+    			appLog.warn("forum/post/vote, inModel null");
+    			return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR);
+    		}
+    		if(inModel.validateError() != null){
+    			appLog.warn("forum/post/vote, validateError return.");
+    			return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR);
+    		}
+    		cur_uid = inModel.getCur_uid();
+    		accountId = inModel.getAccountId();
+    		postID = inModel.getPostID();
+    		voteID = inModel.getVoteID();
+    		itemIDList = inModel.getItemIDList();
+    		appLog.info("forum/post/vote, postID:" + postID + ",voteID:" + voteID + "cur_uid:" + cur_uid);
+    		// 2. 验证用户是否合法;
+    		long time1 = System.currentTimeMillis();
+    		User voteUser = userDAO.getValidatedUser(cur_uid, accountId);
+    		if( voteUser==null || voteUser.getId()==0 || voteUser.getIsTempUser()==1){
+    			appLog.info("forum/post/vote, NOT found validate userid:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_NOT_FOUND);
+    		} else if (voteUser.getIsLocked()==1){
+				appLog.error("forum/post/vote, user locked:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_IS_LOCKED);
+    		}
+    	    // 3. 投票的参数合法性;
+    		final PostVoteModel voteModel_OLD = postVoteDAO.getInfo(voteID, postID);
+			if(voteModel_OLD==null || voteModel_OLD.getId()<=0){
+				appLog.warn("forum/post/vote, not exist, voteID:"+voteID+", postID:"+postID);
+				return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND, "投票不存在!");
+			}
+			if(voteModel_OLD.getVoteType()==1 && itemIDList.size()>1){
+				appLog.warn("forum/post/vote, danxuan, voteType:1, voteID:"+voteID);
+				return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, "此投票为单选!");
+			}
+    		// 4. 检查用户是否已经投票;
+			boolean isUserVoted = postVoteUserDAO.isUserVoted(voteID, cur_uid, postID);
+			if( isUserVoted ){
+				appLog.warn("forum/post/vote, isUserVoted true, cur_uid:"+cur_uid+", voteID:"+voteID);
+				return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, "你已经投过票!");
+			}
+			// 5. 处理投票数据统计;
+			// 5.1 插入用户的投票数据统计;
+			for(Integer itemID: itemIDList){
+				try{
+					postVoteItemUserDAO.insert(voteID, cur_uid, itemID, postID);
+				} catch (Exception exp){
+					exp.printStackTrace();
+					Log4jUtil.exception(exp);
+				}
+			}
+			postVoteUserDAO.insert(voteID, cur_uid, postID);
+			// 5.2 更新每个itemID的统计数据和voteID的数据统计;
+			postVoteItemDAO.updateVoteCount(voteID);
+			postVoteDAO.updateVoteCount(voteID);
+			postVoteDAO.updateVoteUserCount(voteID);
+			// 6. 返回voteModel;
+			final PostVoteModel voteModel = postVoteDAO.getInfo(voteID, postID);
+			List<PostVoteItemModel> itemList = postVoteItemDAO.getItemList(voteID);
+			voteModel.setItemList(itemList);
+			voteModel.setItemListVoted(itemIDList);
+    		long time2 = System.currentTimeMillis();
+    		pfmLog.info("forum/post/vote, all time: "+(time2-time1));
+    		return RequestUtil.succ(voteModel);
+    	} catch(Exception exp) {
+    		exp.printStackTrace();
+        	Log4jUtil.exception(exp);
+    	}
+    	return RequestUtil.error(StatusCode.INTERNET_BUSY);
+    }
+    
+    /**
+     * 处理楼层得附件 －－
+     * @param floorInfo －
+     * @param ignoreLocked －是否忽略已经被锁定的楼层
+     */
+    private void hanleFloorAttachment(PostFloorModel floorInfo, boolean ignoreLocked, double version, 
+    		String versionStr, String device){
+    	if(floorInfo==null || (floorInfo.getIsBlocked()!=0 && ignoreLocked)){
+    		return ;
+    	}
+    	List<Integer> supportType = getSupportedSourceType(floorInfo, version);
+    	List<FloorPicDataModel> temp = null;
+    	List<FloorPicDataModel> dataList = new ArrayList<FloorPicDataModel>();
+    	for(Integer type : supportType) {
+    		temp = getFloorDataList(type, floorInfo.getId());
+    		if(temp==null || temp.size()==0){
+				continue;
+			}
+    		// V3.0.0添加,查询出妆品中的shopList;
+			if(version>=3.0 && type==1){
+				// 查询妆品中的的shopList;
+				for(FloorPicDataModel floorDataModel: temp){
+					if(floorDataModel.getProductID()>0 && floorDataModel.getIsMatchShop()==1){
+						List<ProductShopModel> shopList = productMappingDAO.getShopList(floorDataModel.getProductID());
+						floorDataModel.setShopList(shopList);
+					}
+				}
+			}
+			// V3.0.0添加, 2014-04-04; 优化IOS上面优酷视频不能播放的情况; 对于优酷VideoID2为空的视频取videoID2;
+			if(type==4){
+				for(FloorPicDataModel floorPicDataModel: temp){
+					if(floorPicDataModel.getVideoType()==1 && floorPicDataModel.getVideoID()!=null
+							&& floorPicDataModel.getVideoID().trim().length()>0
+							&& (floorPicDataModel.getVideoID2()==null /*第二次就不会执行,直接从数据库获取VideoID2*/
+							|| floorPicDataModel.getVideoID2().trim().length()==0)){
+						YoukuVideoContent videoContent = youKuVideoService.updateReply(floorPicDataModel.getVideoID(), floorPicDataModel.getId());
+						floorPicDataModel.setVideoViewUrl(videoContent);
+					}
+					/****
+					 * 2014-07-03
+					 * IOS不能播放优酷的视频,VideoViewUrl直接返回VideoPageUrl
+					 * 后面BUG解决,新版本发布后, 注释下面整个IF的代码;
+					 */
+					if(floorPicDataModel!=null && floorPicDataModel.getSourceType()==4 
+							&& floorPicDataModel.getVideoType()==1 
+							&& versionStr!=null && versionStr.compareTo("3.2.1")<0
+							&& (AppUtil.getAppPlatform(device)==1 || AppUtil.getAppPlatform(device)==3)){ 
+						floorPicDataModel.setVideoViewUrl(floorPicDataModel.getVideoPageUrl());
+					}
+				}
+			}
+			dataList.addAll(temp);
+		}
+    	
+    	Collections.sort(dataList,new Comparator<FloorPicDataModel>() {
+			@Override
+			public int compare(FloorPicDataModel o1, FloorPicDataModel o2) {
+				if(o1==null || o2==null){
+				return 1;
+			}
+			return o1.getDataIndex() - o2.getDataIndex();
+			}
+		});
+    	if(dataList.size()>0){
+    		floorInfo.setPicDataList(dataList);
+    	}
+    }
+    
+    /**
+     * 获取支持的附件类型
+     * @param floorInfo
+     * @param version
+     * @return
+     */
+    private List<Integer> getSupportedSourceType(PostFloorModel floorInfo,double version){
+    	ArrayList<Integer> types = new ArrayList<Integer>();
+    	if(floorInfo.getIsProductIn()==1 && version>=2.0){
+    		types.add(1);
+    	}
+    	if(floorInfo.getIsPicIn()==1 && version>=2.0){
+    		types.add(2);
+    	}
+    	if(floorInfo.getIsPostIn()==1 && version>=2.2){
+    		types.add(3);
+    	}
+    	if(floorInfo.getIsVideoIn()==1 && version>=2.3){
+    		types.add(4);
+    	}
+    	if(floorInfo.getIsInsideVideoIn()==1 && version>=4.5){//4.5添加优品视频
+    		types.add(5);
+    	}
+		return types;
+    }
+    
+    /**
+     * 保证不出现null便于上层处理
+     * @param type
+     * @param floorID
+     * @return
+     */
+    private List<FloorPicDataModel> getFloorDataList(int type,int floorID){
+    	List<FloorPicDataModel> temp = null;
+    	switch(type) {
+		case 1:
+			temp = postFloorDataDAO.getProduct(floorID);break;
+		case 2:
+			temp = postFloorDataDAO.getPic(floorID);break;
+		case 3:
+			temp = postFloorDataDAO.getPost(floorID);break;
+		case 4:
+			temp = postFloorDataDAO.getVedio(floorID);break;
+		case 5:
+			temp = postFloorDataDAO.getInsideVedio(floorID);break;
+		default:
+			temp = null;
+		}
+    	if(temp == null){
+    		return new ArrayList<FloorPicDataModel>();
+    	}else{
+    		return temp;
+    	}
+    }
+    
+    /**
+     * 获取支持的附件类型
+     * @param postInfoModel
+     * @param version
+     * @return
+     */
+    private List<Integer> getAllSourceType(PostInfoModel postInfoModel, double version){
+    	ArrayList<Integer> types = new ArrayList<Integer>();
+    	if(postInfoModel.getIsProductIn()==1 && version>=2.0){
+    		types.add(1);
+    	}
+    	if(postInfoModel.getIsPicIn()==1 && version>=2.0){
+    		types.add(2);
+    	}
+    	if(postInfoModel.getIsPostIn()==1 && version>=2.2){
+    		types.add(3);
+    	}
+    	if(postInfoModel.getIsVideoIn()==1 && version>=2.3){       //2.3 添加优酷土豆链接视频
+    		types.add(4);
+    	}
+    	/***
+		 * 优化旧版本中可以查看视频Type=4, 4.5以下的版本也需要看Type=5的优品视频;
+		 * 线上优化: 2015-01-01
+		 * @author wangqingsong
+		 */
+    	if(postInfoModel.getIsInsideVideoIn()==1 && version>=2.3){ //4.5添加优品视频
+    		types.add(5);
+    	}
+    	if(postInfoModel.getIsVoteIn()==1 && version>=4.6){        //4.6添加投票
+    		types.add(6);
+    	}
+		return types;
+    }
+    
+    /**
+     * 保证不出现null便于上层处理
+     * @param type
+     * @param postID
+     * @return
+     */
+    private List<PostPicDataModel> getPostDataList(int type, int postID, int userID, double appVersion){
+    	if(type == 1){
+    		return postDataDAO.getForumPostDataProduct(postID);
+    	} else if (type == 2){
+    		return postDataDAO.getForumPostDataPic(postID);
+    	} else if (type == 3){
+    		return postDataDAO.getForumPostDataPost(postID);
+    	} else if (type == 4){
+    		return postDataDAO.getForumPostDataVedio(postID);
+    	} else if (type == 5){
+    		/***
+    		 * 优化旧版本中可以查看视频Type=4, 4.5以下的版本也需要看Type=5的优品视频;
+    		 * 线上优化: 2015-01-01
+    		 * @author wangqingsong
+    		 */
+    		if(appVersion >= 4.5){
+    			// 大于4.5直接返回数据元素;
+    			return postDataDAO.getForumPostDataInsideVedio(postID);
+    		} else {
+    			List<PostPicDataModel> dataVideo5List = postDataDAO.getForumPostDataInsideVedio(postID);
+    			return PostPicDataModel.getVideo4FromYouPinVideo5(dataVideo5List);
+    		}
+    	} else if (type == 6){
+    		// 1. 查询帖子中所有的投票;
+			List<PostPicDataModel> dataVoteList = postDataDAO.getForumPostDataVote(postID);
+			if(dataVoteList==null || dataVoteList.size()==0){
+				return null;
+			}
+			// 2. 准备数据, 数据主要是以postVoteID进行分组的List;
+			// 2.1 帖子中所有的postVoteID与PostVoteModel的对应关系;
+			final Map<Integer, PostVoteModel> postAllVoteMap = postVoteDAO.getInfoMap(postID);
+			List<Integer> voteIDList = PostVoteModel.getIDList(postAllVoteMap);
+			List<PostVoteItemModel> allVoteItemList = postVoteItemDAO.getItemList(voteIDList);
+			// 2.2 帖子中所有的postVoteID与PostVoteItemModel的对应关系;
+			final Map<Integer, List<PostVoteItemModel>> postAllItemMap = PostVoteItemModel.getVoteItemMap(allVoteItemList);
+			// 2.3 帖子中用户选择后的结果数据;
+			Map<Integer, List<Integer>> postAllUserVoteMap = null;
+			if(userID > 0){
+				List<PostUserVote> allUserVoteItemList = postVoteItemUserDAO.getUserVoteItemList(voteIDList, userID);
+				postAllUserVoteMap = PostUserVote.getVoteItemMap(allUserVoteItemList);
+			}
+			if(postAllUserVoteMap == null){ /**NOT NULL**/
+				postAllUserVoteMap = new HashMap<Integer, List<Integer>>();
+			}
+			// 3. 设置投票中的详细信息;
+			for(PostPicDataModel dataModel: dataVoteList){
+				if(dataModel!=null && dataModel.getPostVoteID()>0){
+					int postVoteID = dataModel.getPostVoteID();
+					// postVoteID对应的PostVoteModel;
+					final PostVoteModel postVoteModel = postAllVoteMap.get(postVoteID);
+					// postVoteID对应的List<PostVoteItemModel>;
+					List<PostVoteItemModel> itemList = postAllItemMap.get(postVoteID);
+					postVoteModel.setItemList(itemList);
+					// postVoteID对应的投票过的ItemIDList;(必须在setItemList后调用)
+					List<Integer> itemIDVotedList = postAllUserVoteMap.get(postVoteID);
+					postVoteModel.setItemListVoted(itemIDVotedList);
+					// 设置Data中的PostVoteModel;
+					dataModel.setVote(postVoteModel);
+				}
+			}
+			return dataVoteList;
+    	} 
+		return null;
+    }
+    
+    /***
+     * 只看楼主; 包含翻页;
+     * 请求论坛板块帖子的详情信息时只看楼主;
+     * {"post_id", 1, "beginFloorIndex":23, "cur_uid": 70402, "accountId":"1272239025"}
+     * 返回的楼层不包含 beginFloorIndex;(客户端只需返回楼层的最大值即可)
+     */
+    @Post("owner")
+    public Object owner(final Invocation inv, @Param("data") final String data, 
+    		@Param("device") final String device) {
+    	final int cur_uid;
+    	final int post_id;
+    	final int beginFloorIndex;
+		@SuppressWarnings("unused")
+		final String accountId;
+        try {
+        	// 1. 接收数据
+			final JSONObject json = new JSONObject(data);
+			cur_uid = json.optInt("cur_uid");
+			accountId = json.optString("accountId");
+			post_id = json.optInt("post_id");
+			beginFloorIndex = json.optInt("beginFloorIndex");
+			appLog.info("forum/post/owner, beginFloorIndex:"+beginFloorIndex+", post_id:"+post_id);
+			// 2. 验证参数的合法性;
+			if(post_id <= 0){ 
+				appLog.error("forum/post/owner, post_id=0.");
+				return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND);
+			}
+			long time1 = System.currentTimeMillis();
+			DeviceModel deviceModel = GSonUtil.getObjectFromJson(device, DeviceModel.class);
+			final double version = AppUtil.getAppVersion(deviceModel);
+			final String versionString = deviceModel.getApp_ver();
+			// 3. 验证帖子的有效性;
+			PostInfoModel postInfoModel = postDAO.getInfo(post_id);
+			if(postInfoModel==null){
+				appLog.error("forum/post/owner, post not found:"+post_id);
+				return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND);
+			}
+			//3.1 V4.6新增需求，增加是否@某个用户
+			if(postInfoModel.getIsAtUser()>0){
+				List<AtUser> users = atSymbolDAO.getAllForPost(postInfoModel.getId());
+				if(version >= 4.6){
+					postInfoModel.setAtUserList(users);
+				}else {
+					String resovledContent = AppUtil.resolveAtSymbol(postInfoModel.getContent(), users, false);
+					postInfoModel.setContent(resovledContent);
+				}
+			}
+			int authorUserID = postInfoModel.getAuthorUserID();
+			// 5. *** 查询floorIndex以下的楼层;
+			List<PostFloorModel> floorList = postFloorDAO.getOwnerPage(post_id, 
+					authorUserID, beginFloorIndex, POSTOWNER_FLOOR_PAGE_ITEM_SIZE);
+			// 6. 处理楼层中的补充数据;
+			if(floorList==null || floorList.size()==0){
+				appLog.info("forum/post/owner, beginFloorIndex:"+beginFloorIndex+", post_id:"+post_id);
+				appLog.warn("forum/post/owner, post:"+post_id+",floorList.size()=0");
+				return RequestUtil.succ(floorList);
+			}
+			int floorSize = floorList.size();
+			appLog.info("forum/post/owner, get floor PicOrProductData," +
+					"FloorReplies start, floorSize:"+floorSize);
+			// 7. floorReplyIDList为了一次性查询我是否顶过该楼层;
+			long time4 = System.currentTimeMillis();
+			List<Integer> floorReplyIDList = new ArrayList<Integer>();
+			// 6.2.2 查询每个楼层的妆品和回复数据;
+			for(PostFloorModel floormodel: floorList){
+				if(floormodel==null){
+					continue;
+				}
+				int floorReplyID = floormodel.getId();
+				floorReplyIDList.add(floorReplyID);
+				// 这里接着写查询每个楼层的妆品和图片;
+				hanleFloorAttachment(floormodel, false, version, versionString, device);//原始代码，遇到楼层被锁定，也会去查附件，why
+				// 查询单独楼层中的每个用户的回复数据;
+				if(floormodel.getIsOtherReplied()==1){
+					List<PostFloorReplyModel> floorReplyList = postFloorReplyDAO.getFloorReplies(
+							floorReplyID, 0, FLOOR_REPLYS_QUERY_SIZE);
+					floormodel.setReplyList(floorReplyList);
+				}
+				//v4.6 新增@功能
+				if(floormodel.getIsAtUser() >= 0){
+					List<AtUser> users = atSymbolDAO.getAllForPostReply(floormodel.getId());
+					if(version >= 4.6){
+						floormodel.setAtUserList(users);
+					}else {
+						String resolvedContent = AppUtil.resolveAtSymbol(floormodel.getContent(), users, false);
+						floormodel.setContent(resolvedContent);
+					}
+				}
+			}
+			long time5= System.currentTimeMillis();
+			appLog.info("forum/post/owner, get PicOrProductData,FloorReplies success. takes MS:"+(time5-time4));
+			pfmLog.info("forum/post/owner, get PicOrProductData,FloorReplies success. takes MS:"+(time5-time4));
+			// 6.2.3 查询我是否顶过论坛中的楼层;
+			if(floorReplyIDList!=null && floorReplyIDList.size()>0 && cur_uid>0){
+				List<Integer> floorLikeList = floorLikeActionDAO.getIfILiked(cur_uid, floorReplyIDList);
+				if(floorLikeList!=null && floorLikeList.size()>0){
+					for(PostFloorModel floormodel: floorList){
+						int floorReplyID = floormodel.getId();
+						if(floorLikeList.contains(floorReplyID)){
+							floormodel.setIToped(true);
+						}
+					}
+				}
+			}
+			long time6 = System.currentTimeMillis();
+			// 7.加版本号;
+			pfmLog.info("forum/post/owner, query floorSize:"+floorSize+" all MS:"+(time6-time1)); 
+			appLog.info("forum/post/owner, succ return post_id:"+post_id+",floorSize:"+floorSize);
+    		return RequestUtil.succ(version, floorList);
+        } catch (Exception exp){
+        	exp.printStackTrace();
+        	Log4jUtil.exception(exp);
+        }
+        return RequestUtil.error(StatusCode.INTERNET_BUSY);
+    }
+    
+
+    
+    /**
+     * 回复主贴 Reply
+     * 
+     * 请求报文说明:
+     * {"cur_uid": 用户ID, "accountId": 用户accountId,"content": 回复内容,"postId": 回复帖子ID, 
+	 *  "picList": [{  	##图片和妆品的List
+	 * 		"type": 区分类型: 1妆品, 2图片
+	 * 		"pid": 妆品ID(如果type=2,取0) 
+	 * 		"picUrl": 图片的相对URL   (type=1,pid>0,picUrl=””; type=2, picUrl=”上传图片路径”)
+	 * 		"content": 对图片或者商品妆品的说明信息 
+	 *  	}, … ]
+	 * } 
+	 * 
+	 * 返回报文说明:
+     *      {"code": 状态码 ,"data": {"id":　帖子id,"floorIndex": 楼层号}}
+     * @author Liux
+     */
+    @Post("reply")
+    public Object reply(final Invocation inv, @Param("data") final String data, 
+    		@Param("device") final String device){
+    	final int postId;
+    	final int cur_uid;
+		final String accountId;
+		final PostReplyModel inModel;
+		int floorIndex = 1; 
+		try {
+        	// 1. 接收数据
+			inModel =  GSonUtil.getObjectFromJson(data, PostReplyModel.class);
+			cur_uid = inModel.getCur_uid();
+			accountId = inModel.getAccountId();
+			postId = inModel.getPostId();
+			// 1.1 version
+			DeviceModel deviceModel = GSonUtil.getObjectFromJson(device, DeviceModel.class);
+			final double version = AppUtil.getAppVersion(deviceModel);
+			final String versionString = deviceModel.getApp_ver();
+			// 2. 判断用户的合法性
+			User replyUser = userDAO.getValidatedUser(cur_uid, accountId);
+			if(replyUser==null || replyUser.getIsTempUser()==1){
+				appLog.error("forum/post/reply, user not validated cur_uid:"+cur_uid);
+				return RequestUtil.error(StatusCode.USER_NOT_FOUND);
+			} else if (replyUser.getIsLocked()==1){
+				appLog.error("forum/post/reply, user locked:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_IS_LOCKED);
+    		}
+			// V3.1.0添加对内容进行关键字过滤
+			String filterContet = paramStaticService.getMochaStaticParam(MochaStaticParam.CONTENT_FILTER);
+			String errorString = inModel.validateError(filterContet);
+			if(errorString!=null && errorString.length()>0){
+				appLog.error("forum/post/reply, errorString:"+errorString);
+				return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, errorString);
+			}
+			// 3.1 判断用户的设备合法性;
+			Integer isValidObj = appDeviceDAO.getISValid(replyUser.getDeviceID());
+			if(isValidObj==null || (isValidObj!=null && isValidObj.intValue()==0)){
+				appLog.warn("forum/post/reply, device is locked:"+replyUser.getDeviceID());
+				return RequestUtil.error(StatusCode.DEVICE_IS_LOCKED);
+			}
+			// 3.2 验证帖子ID
+			long time1 = System.currentTimeMillis();
+			if(postId <= 0){ 
+				appLog.error("forum/post/reply, postId <= 0.");
+				return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND);
+			} 
+			// 3.3 获取帖子Model;
+			final PostInfoModel postInfo = postDAO.getInfo(postId);
+			if(postInfo == null ){
+				appLog.error("forum/post/reply, postInfo == null || postInfo.isValid == 0.");
+				return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND);
+			}
+			// 3.4 V2.3: 1个小时内回复自己的不同帖子超过5篇（不包括回复楼层）;用于限制用户顶自己的帖子;
+			if(postInfo.getAuthorUserID() == cur_uid){
+				// https://tower.im/projects/855e7142e9864606a2d38f7bb165245f/todos/4b3cef63f22846db926f95ca0ec21f91/#44dae71e89004a02bb4dfc68f5da7911
+				int replyOwnPostCount = postFloorDAO.getUserReplyOwnPostCount(cur_uid, 60);
+				if(replyOwnPostCount >= 5){
+					appLog.warn("forum/post/reply, return, replyOwnPostCount:"+replyOwnPostCount);
+					return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, "你今天回复自己帖子太多了，休息一下吧");
+				}
+			}
+			// 3.5 V2.3: 1个小时内，不能发表3次以上重复内容 
+			if(inModel.getContent() != null && inModel.getContent().length() > 0){
+				Integer replyContentCount = postFloorDAO.getUserReplyContentCount(cur_uid, 60, inModel.getContent());
+				if(replyContentCount != null && replyContentCount >= 3){
+					appLog.warn("forum/post/reply, return, replyContentCount:"+replyContentCount);
+					return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, "重复回复太多了亲，休息一下…");
+				}
+			}
+			//v4.6 增加，是否@了用户
+			int isAtUser = 0;
+			if(inModel.getAtUserIDList()!=null && inModel.getAtUserIDList().size()>0){
+				isAtUser = 1;
+				String validateInfo = privilegeLevelService.validate(replyUser,PrivilegeLevelService.LevelActionType.Forum_AT_1);
+				if(validateInfo != null){
+					return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR,validateInfo);
+				}
+			}
+			// 若有妆品或图片信息需要保存，判定isProductIn,isPicIn值
+			int isProductIn = 0;
+			int isPicIn = 0;
+			int isPostIn = 0;
+			int isVideoIn = 0;
+			int isInsideVedioIn = 0;
+			if(inModel.getPicList() != null && inModel.getPicList().size() > 0){   
+				List<PostReplyPicInModel> subjoinList = inModel.getPicList();
+				for (PostReplyPicInModel obj : subjoinList) {
+					if(obj == null){
+						continue;
+					}
+					if(obj.getType()==1 && obj.getPid()>0){           // 妆品
+						isProductIn = 1;
+					} else if (obj.getType()==2 && obj.getPicUrl()!=null 
+							&& obj.getPicUrl().trim().length()>0){    // 图片
+						isPicIn = 1;
+					} else if (obj.getType()==3 && obj.getPostid()>0){// 引用帖子
+						isPostIn = 1;
+					} else if (obj.getType()==4 && obj.getVideoPageUrl()!=null
+							&& obj.getVideoPageUrl().trim().length()>0){
+						isVideoIn = 1;
+					} else if(obj.getType()==5 && obj.getInsideVideoID()!=0){
+						isInsideVedioIn = 1;
+					}
+				}
+			}
+			// 4. 回复帖子
+			String content = PublicUtil.getTrimIfNullValueBlank(inModel.getContent());
+			floorIndex = postInfo.getFloorCount() + 1; //当前楼数 = 已回复数 + 1
+			// 4-5.判断是否为主题帖; V2.3删除;
+			appLog.info("forum/post/reply, postInfo.getIsActivity():" + postInfo.getIsActivity());
+			// 在高压力访问下; 会出现异常, 唯一主键冲突; 解决办法是出现异常楼层加1;
+			int floorReplyID = postFloorDAO.insert(content, postId, floorIndex, cur_uid, isPostIn, isProductIn, isPicIn, isVideoIn, isInsideVedioIn,isAtUser);
+			// 5. 再此重新查询帖子的楼层数目;
+			int postFloorCount = postFloorDAO.getPostFloorCount(postId);
+			int postReplyCount = postFloorCount + postFloorReplyDAO.getPostFloorReplyReplyCount(postId);
+			// 5. 更新主贴信息
+			// BUG解决: 回复帖子时,更新帖子的楼层数+1和帖子的回复数+1;启用实时查询数据库中真正的总数;
+			postDAO.updateFloorCountAndReplyCount(postFloorCount, postReplyCount, postId);
+			if(postInfo.getIsAdvertorial() == 1){
+				postDAO.updatePostChangeInfo_Advertorial(cur_uid, postId);
+			} else {
+				postDAO.updatePostChangeInfo(cur_uid, postId);
+			}
+			// 6. 增加帖子附加信息--图片或妆品
+			String replyPicUrl = null; //replyPicUrl为妆品的URL或者为图片的URL;发消息时用;
+			List<PostReplyPicInModel> prdPicList = inModel.getPicList();
+			if(prdPicList!=null && prdPicList.size()>0){
+				int dataIndex = 0;
+				boolean msgColumnValued = false; // 是否已经给发消息的对象列(replyPicUrl,content;)赋值了?
+				for(PostReplyPicInModel picInModel: prdPicList){
+					if(! msgColumnValued){
+						// 给发消息时的每个列赋值; replyPicUrl & content;
+						if(picInModel.getType()==1 && picInModel.getPid()>0){
+							replyPicUrl = AppUtil.getDomainPic(productDAO.getPicUrl(picInModel.getPid()));
+							// 如果前面content为空, 采用下面的文字作为消息发送;
+							if(content==null || content.trim().length()==0){
+								content = "分享了妆品";
+							}
+							msgColumnValued = true;
+						} else if (picInModel.getType()==2 && picInModel.getPicUrl()!=null 
+								&& picInModel.getPicUrl().trim().length()>0 ){
+							replyPicUrl = AppUtil.getDomainPic(picInModel.getPicUrl());
+							// 如果前面content为空, 采用下面的文字作为消息发送;
+							if(content==null || content.trim().length()==0){
+								content = "分享了图片";
+							}
+							msgColumnValued = true;
+						} else if (picInModel.getType()==3 && picInModel.getPostid()>0 ){
+							// 如果前面content为空, 采用下面的文字作为消息发送;
+							if(content==null || content.trim().length()==0){
+								content = "引用了帖子";
+							}
+							msgColumnValued = true;
+						} else if (picInModel.getType()==4 && picInModel.getVideoPageUrl()!=null
+								&& picInModel.getVideoPageUrl().length()>0){
+							if(picInModel.getVideoPic()==null || picInModel.getVideoPic().trim().length()==0){
+								replyPicUrl = AppConstants.URL_MOCHA_IMAGE_PFEFIX+AppConstants.PIC_VIDEO_DEFAULT;
+							} else {
+								replyPicUrl = picInModel.getVideoPic();
+							}
+							// 如果前面content为空, 采用下面的文字作为消息发送;
+							if(content==null || content.trim().length()==0){
+								content = "分享了视频";
+							}
+							msgColumnValued = true;
+						} else if(picInModel.getType()==5 && picInModel.getInsideVideoID()!=0){
+							if(content==null || content.trim().length()==0){
+								content = "分享了视频";
+							}
+						}
+					}
+					dataIndex ++;
+					// 线上BUG; 如果用户输入Content为null; 则会抛出异常;
+					picInModel.setContent(PublicUtil.getTrimIfNullValueBlank(picInModel.getContent())); 
+					postFloorDataDAO.insertReplyData(picInModel, floorReplyID, dataIndex);
+				}
+			}
+			// 7. 发送消息; 帖子被回复;
+			User postAuthorUser = this.userDAO.getUser(postInfo.getAuthorUserID());
+			// 8. 帖子回复楼层超过10/50/100/1000; 给帖子的作者加抹茶币,并消息通知该用户;
+			if(floorIndex==10 || floorIndex==50 || floorIndex==100 || floorIndex==1000){ 
+				appLog.info("forum/post/reply, add mochaBill for author, floorIndex to "+floorIndex);
+				// 哇/真棒/好厉害/天呐,超过10/50/100/1000位茶友,10/20/30/50个抹茶币作为奖励
+				String ohMyGodWord = "哇"; int mochaValue = -1;
+				if(floorIndex==10){
+					ohMyGodWord = "哇";
+					MochaBillModel mochaBill = mochaBillService.getMochaBill(postAuthorUser, 
+							AppConstants.MochaValueType.FORUM_POSTFLOOR_REPLY_10);
+					if(mochaBill!=null){
+						mochaValue = mochaBill.getActionValue();
+					}
+				} else if (floorIndex==50){
+					ohMyGodWord = "真棒";
+					MochaBillModel mochaBill = mochaBillService.getMochaBill(postAuthorUser, 
+							AppConstants.MochaValueType.FORUM_POSTFLOOR_REPLY_50);
+					if(mochaBill!=null){
+						mochaValue = mochaBill.getActionValue();
+					}
+				} else if (floorIndex==100){
+					ohMyGodWord = "好厉害";
+					MochaBillModel mochaBill = mochaBillService.getMochaBill(postAuthorUser, 
+							AppConstants.MochaValueType.FORUM_POSTFLOOR_REPLY_100);
+					if(mochaBill!=null){
+						mochaValue = mochaBill.getActionValue();
+					}
+				} else if (floorIndex==1000){
+					ohMyGodWord = "天呐";
+					MochaBillModel mochaBill = mochaBillService.getMochaBill(postAuthorUser, 
+							AppConstants.MochaValueType.FORUM_POSTFLOOR_REPLY_1000);
+					if(mochaBill!=null){
+						mochaValue = mochaBill.getActionValue();
+					}
+				}
+				// #### 这里做一个逻辑: 此类抹茶币每天次数有上限,发消息前判断抹茶币是否返回正确!!
+				// 发消息前判断用户得到的抹茶币>0; 
+				if(mochaValue > 0){
+					boolean flag = messageService.doPostRepliedNum(postAuthorUser, postId, 
+							floorIndex, mochaValue,ohMyGodWord, postInfo.getTitle());
+					appLog.info("forum/post/reply, postAuthorUser("+postAuthorUser.getId()
+							+") getMochaValue:"+mochaValue+",send msg:"+flag);
+				}
+			} 
+			// 9. 处理返回数据, 抹茶币; 自己回复自己的帖子不加抹茶币,不发消息;
+			PostReplyRetModel retModel = new PostReplyRetModel();
+			// BUG解决: 普通回复也有抹茶币奖励!
+			// 抢到沙发, 抢到板凳, 抢到地板抹茶币更改值;
+			if(postInfo.getAuthorUserID() != cur_uid) {
+				int otherMochaValue=0;
+				String actionContent = null;
+				if(floorIndex==1){
+					otherMochaValue = 2; 
+					actionContent = "抢到沙发";
+				} else if (floorIndex==2){
+					otherMochaValue = 1;
+					actionContent = "抢到板凳";
+				} else if (floorIndex==3){
+					otherMochaValue = 0;
+					actionContent = "抢到地板";
+				} 
+				MochaBillModel mochaBill = mochaBillService.getMochaBill(replyUser, 
+						AppConstants.MochaValueType.REPLY_POST_VIDEO, otherMochaValue);
+				// BUG修复: 如果floorIndex=1,2,3显示抢到XXX;
+				if((floorIndex==1 || floorIndex==2 || floorIndex==3) && mochaBill!=null 
+						&& actionContent!=null && actionContent.trim().length()>0){
+					mochaBill.setActionContent(actionContent);
+				}
+				retModel.setMochaBill(mochaBill);
+			}
+			// 10. 返回该楼层的信息;
+			PostFloorModel replyFloor = postFloorDAO.getFloorIndexInfo(postInfo.getId(), floorIndex);
+			hanleFloorAttachment(replyFloor, false, version, versionString, device);//原始代码，遇到楼层被锁定，也会去查附件
+			retModel.setReplyFloor(replyFloor);
+    		long time2 = System.currentTimeMillis();
+    		pfmLog.info("forum/post/reply, time: "+(time2-time1));
+        	// 12. 回复帖子后，insert Forum_UserPost_Relation
+			// v4.6增加 @关系
+			addAtRelation(floorReplyID,inModel.getAtUserIDList(), AtUser.AT_TYPE_REPLY);
+			// 内容解析成 包含名字的内容
+			List<AtUser> atUsers = atSymbolDAO.getAllForPostReply(floorReplyID);
+			String resolvedContent = AppUtil.resolveAtSymbol(inModel.getContent(),atUsers,false);
+			if(replyFloor.getIsAtUser() >= 0){
+				List<AtUser> users = atSymbolDAO.getAllForPostReply(replyFloor.getId());
+				if(version >= 4.6){
+					replyFloor.setAtUserList(users);
+				}else {
+					replyFloor.setContent(resolvedContent);
+				}
+			}
+			//为下一步的粉丝动态信息，设置解析后的content
+			String forShare = AppUtil.resolveAtSymbol(inModel.getContent(),atUsers,true);
+        	List<String> picUrlList = postFloorDataDAO.getDongTaiPicUrlList(floorReplyID, 4,
+        			AppConstants.PIC_PRODUCT_DEFAULT, AppConstants.PIC_VIDEO_DEFAULT);
+        	String picUrlInsert = ForumSectionActiveModel.getInsertPicUrls(picUrlList);
+        	userPostRelationDAO.insert(cur_uid, postId, floorIndex, postInfo.getTitle(),
+					forShare, picUrlInsert, ForumUserPostRelationModel.TYPE_REPLY_POST,1);
+			// 13. 添加版本信息;
+			userLevelTaskService.registerTask(AppConstants.UserLevelTaskType.POST_REPLY, cur_uid);
+			//将消息发送放到最后来，便于处理啊
+			if(postInfo.getAuthorUserID() != cur_uid) {
+				//2013-12-26 加入floorindex信息
+				String finalMsg = AppUtil.resolveAtSymbol(content,atSymbolDAO.getAllForPostReply(floorReplyID),true);
+				messageService.doPostReplied(postAuthorUser, replyUser, postId,floorIndex, postInfo.getTitle(), replyPicUrl, finalMsg);
+			}
+			//@功能 发送消息提醒
+			sendMsg(replyUser,inModel.getAtUserIDList(),postInfo.getId(),floorIndex,postInfo.getTitle(), MessageType.AT_POST_REPLY);
+			return RequestUtil.succ(version, retModel);
+        } catch(Exception e){
+        	e.printStackTrace();
+        	Log4jUtil.exception(e);
+        }
+        return RequestUtil.error(StatusCode.INTERNET_BUSY);
+    }
+    
+    /**
+     * 回复主贴 Reply更新;
+     * {"cur_uid": 111, "accountId": "dsada78", "content": 回复内容, "postId": 回复帖子ID, 
+	 *  "picList": [{  	##图片和妆品的List
+	 *      "id":
+	 * 		"type": 区分类型: 1妆品, 2图片
+	 * 		"pid": 妆品ID(如果type=2,取0) 
+	 * 		"picUrl": 图片的相对URL   (type=1,pid>0,picUrl=””; type=2, picUrl=”上传图片路径”)
+	 * 		"content": 对图片或者商品妆品的说明信息 
+	 *  	}, … ]
+	 * } 
+     * {"code": 状态码 ,"data": {"id":帖子id,"floorIndex": 楼层号}}
+     * @since 2.1
+     */
+    @Post("reply/update")
+    public Object replyUpdate(final Invocation inv, @Param("data") final String data,
+    		 @Param("device") final String device){
+    	final PostReplyUpdateModel inModel;
+    	final int floorReplyID;
+    	final int cur_uid;
+		final String accountId;
+		try {
+        	// 1. 接收数据
+			inModel =  GSonUtil.getObjectFromJson(data, PostReplyUpdateModel.class);
+			if(inModel == null){
+				appLog.warn("forum/post/reply/update, PostReplyUpdateModel is not validated.");
+				return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR);
+			}
+			// 1.1 version
+			DeviceModel deviceModel = GSonUtil.getObjectFromJson(device, DeviceModel.class);
+			final double version = AppUtil.getAppVersion(deviceModel);
+			final String versionString = deviceModel.getApp_ver();
+			// V3.1.0添加对内容进行关键字过滤
+			String filterContet = paramStaticService.getMochaStaticParam(MochaStaticParam.CONTENT_FILTER);
+			String validateError = inModel.validateError(filterContet);
+			if(validateError!=null && validateError.length()>0){
+				appLog.warn("forum/post/reply/update, validateError:"+validateError);
+				return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, validateError);
+			}
+//			postID = inModel.getPostId();
+			floorReplyID = inModel.getFloorReplyId();
+			cur_uid = inModel.getCur_uid();
+			accountId = inModel.getAccountId();
+			appLog.info("forum/post/reply/update, floorReplyID:"+floorReplyID+", cur_uid:"+cur_uid);
+			// 2. 判断用户的合法性
+			User doUser = userDAO.getValidatedUser(cur_uid, accountId);
+			if(doUser==null || doUser.getIsTempUser()==1){
+				appLog.error("forum/post/reply/update, user not validated cur_uid:"+cur_uid);
+				return RequestUtil.error(StatusCode.USER_NOT_FOUND);
+			} else if (doUser.getIsLocked()==1){
+				appLog.error("forum/post/reply/update, user locked:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_IS_LOCKED);
+    		}
+		    // 3.1 判断用户的设备合法性;
+			Integer isValidObj = appDeviceDAO.getISValid(doUser.getDeviceID());
+			if(isValidObj==null || (isValidObj!=null && isValidObj.intValue()==0)){
+				appLog.warn("forum/post/reply/update, device is locked:"+doUser.getDeviceID());
+				return RequestUtil.error(StatusCode.DEVICE_IS_LOCKED);
+			}
+			// 3. 验证帖子楼层回复信息;
+			long time1 = System.currentTimeMillis();
+			final PostFloorModel postFloor = postFloorDAO.getPostFloorModel(floorReplyID);
+			//管理员也可以修改他人的帖子
+			if(postFloor==null){
+				appLog.error("forum/post/reply/update, postFloor not found.");
+				return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND);
+			}
+			// 3.1 必须为管理员和帖子的作者才能对帖子进行修改.
+			if(cur_uid != postFloor.getAuthorUserID()){
+    			// V4.0.0 启用新的权限规则控制20140822
+				String errorString = privilegeService.validate(doUser, ActionType.ForumSection_2);
+				if(errorString!=null && errorString.trim().length()>0){
+					appLog.warn("forum/post/reply/update, errorString:" + errorString);
+					return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, errorString);
+				}
+				mochaLogDAO.insert("forum_postlist_floorreply", floorReplyID, cur_uid, "update info");
+			}
+    		// 3.5 V2.3: 1个小时内，不能发表3次以上重复内容 
+			if(inModel.getContent() != null && inModel.getContent().length() > 0){
+				Integer replyContentCount = postFloorDAO.getUserReplyContentCount(cur_uid, 60, inModel.getContent());
+				if(replyContentCount != null && replyContentCount >= 3){
+					appLog.warn("forum/post/reply, return, replyContentCount:"+replyContentCount);
+					return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, "你今天回复这种内容太多了，休息一下吧");
+				}
+			}
+			//v4.6 增加，是否@了用户
+			int isAtUser = 0;
+			if(inModel.getAtUserIDList()!=null && inModel.getAtUserIDList().size()>0){
+				isAtUser = 1;
+				String validateInfo = privilegeLevelService.validate(doUser,PrivilegeLevelService.LevelActionType.Forum_AT_1);
+				if(validateInfo != null){
+					return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR,validateInfo);
+				}
+			}
+			// 4. 若有妆品或图片信息需要保存，判定isProductIn,isPicIn值
+			int isProductIn = 0;
+			int isPicIn = 0;
+			int isPostIn = 0;
+			int isVideoIn = 0;
+			int isInsideVideoIn = 0;
+			// 5. 设置原来楼层回复的妆品和图片无效;
+			postFloorDataDAO.updateISNotValid(floorReplyID);
+			if(inModel.getPicList()!=null && inModel.getPicList().size()>0){   
+				List<PostReplyUpdatePicInModel> subjoinList = inModel.getPicList();
+				int dataIndex = 0;
+				for (PostReplyUpdatePicInModel obj : subjoinList) {
+					if(obj==null){
+						continue;
+					}
+					dataIndex ++;
+					appLog.info("forum/post/reply/update, inModel.getPicList().obj:"+obj.getType() + ",obj.id:" + obj.getId());
+					if(obj.getType()==1 && obj.getPid()>0){         // 妆品
+						isProductIn = 1;
+					} else if (obj.getType()==2 && obj.getPicUrl()!=null 
+							&& obj.getPicUrl().trim().length()>0){  // 图片
+						isPicIn = 1;
+					} else if (obj.getType()==3 && obj.getPostid()>0){ // 帖子
+						isPostIn = 1;
+					} else if (obj.getType()==4 && obj.getVideoPageUrl()!=null 
+							&& obj.getVideoPageUrl().trim().length()>0){ // 视频
+						isVideoIn = 1;
+					}else if(obj.getType()==5 && obj.getInsideVideoID()!=0){
+						isInsideVideoIn = 1;
+					}
+					// 5.1 重新增加帖子附加信息--图片或妆品
+					if(obj.getId() <= 0){
+						//更新
+						postFloorDataDAO.insertReplyData(obj, floorReplyID, dataIndex);
+					} else {
+						//新增
+						postFloorDataDAO.updateReplyData(obj, floorReplyID, dataIndex);
+					}
+				}
+				appLog.info("forum/post/reply/update, subjoinList.size:"+subjoinList.size());
+			}
+			appLog.info("forum/post/reply/update, isProductIn:"+isProductIn+",isPicIn:"+isPicIn+",isPostIn:"+isPostIn+",isVideoIn:"+isVideoIn);
+			// 6. 更新帖子; 
+			String content = PublicUtil.getTrimIfNullValueBlank(inModel.getContent());
+			postFloorDAO.update(content, isPostIn, isProductIn, isPicIn, isVideoIn,
+					floorReplyID, postFloor.getPostID(), isInsideVideoIn,postFloor.getFloorIndex(),isAtUser);
+			appLog.info("forum/post/reply/update, update floor success.");
+			// 7. 返回该更新后的楼层信息; 获取App客户端的版本号;
+			PostFloorModel replyFloor = postFloorDAO.getFloorIndexInfo(postFloor.getPostID(), postFloor.getFloorIndex());
+			hanleFloorAttachment(replyFloor, false, version, versionString, device);//原始代码，遇到楼层被锁定，也会去查附件，why
+			Integer isIToped = floorLikeActionDAO.getIfILiked(floorReplyID, cur_uid);
+			replyFloor.setIToped(isIToped!=null && isIToped.intValue()>0);
+			// v4.6增加 @功能
+			updateAtRelation(floorReplyID, inModel.getAtUserIDList(), AtUser.AT_TYPE_REPLY);
+			if(replyFloor.getIsAtUser() >= 0){
+				List<AtUser> users = atSymbolDAO.getAllForPostReply(replyFloor.getId());
+				if(version >= 4.6){
+					replyFloor.setAtUserList(users);
+				}else {
+					String resolvedContent = AppUtil.resolveAtSymbol(replyFloor.getContent(), users, false);
+					replyFloor.setContent(resolvedContent);
+				}
+			}
+			List<Integer> needMsgUser = diffUserIDList(inModel.getPreAtUserIDList(),inModel.getAtUserIDList());
+			final PostInfoModel postInfo = postDAO.getInfo(postFloor.getPostID());
+			sendMsg(doUser,needMsgUser,postFloor.getPostID(),postFloor.getFloorIndex(),postInfo.getTitle(), MessageType.AT_POST_REPLY);
+    		long time2 = System.currentTimeMillis();
+    		pfmLog.info("forum/post/reply/update, all time: "+(time2-time1));
+    		appLog.info("forum/post/reply/update, return success. version:"+version);
+			return RequestUtil.succ(version, replyFloor);
+        } catch(Exception e){
+        	e.printStackTrace();
+        	Log4jUtil.exception(e);
+        }
+        return RequestUtil.error(StatusCode.INTERNET_BUSY);
+    }
+    
+    /***
+     * 帖子管理操作; "type":操作类型（-2添加到热榜,-1删除，0普通，1精华，2板块置顶，3官方，4首页置顶(其他板块不显示此贴,例:新人必读等))}
+     * {"cur_uid":70402, "accountId":"1272239025", "postId":908514, "type":1}
+	 * @author Liux
+     */
+    @Post("control")
+    public Object control(final Invocation inv,@Param("data") final String data){
+    	final int cur_uid;
+    	final String accountId;
+    	final int postId;
+    	final int type;
+    	try{
+    		final JSONObject json = new JSONObject(data);
+    		cur_uid = json.optInt("cur_uid");
+    		accountId = json.optString("accountId");
+    		postId = json.optInt("postId");
+    		type = json.optInt("type");
+    		appLog.info("forum/post/control, postId:"+postId+",cur_uid:"+cur_uid + ",type:"+type);
+    		// 2. 验证用户是否合法;
+    		// long time1 = System.currentTimeMillis();
+    		if(cur_uid==0 || accountId==null || accountId.trim().length()==0){ 
+    			appLog.info("forum/post/control, NOT found validate userid:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_NOT_FOUND);
+    		} 
+    		// 3．验证帖子;
+			if(postId <= 0){ 
+				appLog.error("forum/post/control, postId <= 0.");
+				return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND);
+			}
+			// 4.数据级验证用户与帖子
+    		User validateuser = userDAO.getValidatedUser(cur_uid,accountId);;
+    		if( validateuser==null || validateuser.getId()==0 || validateuser.getIsTempUser()==1){
+    			appLog.info("forum/post/control, NOT found validate userid:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_NOT_FOUND, "您没有权限!");
+    		} else if (validateuser.getIsLocked()==1){
+				appLog.error("forum/post/control, user locked:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_IS_LOCKED);
+    		}
+    		PostInfoModel postInfo = this.postDAO.getInfo(postId);
+			if(postInfo == null){
+				appLog.error("forum/post/control, postInfo is null.");
+				return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND);
+			}
+			if(type >= 0){
+				// 0普通，1精华，2板块置顶，3官方，4首页置顶(其他板块不显示此贴,例:新人必读等)
+				// V4.0.0 启用新的权限规则控制20140822
+				String errorString = privilegeService.validate(validateuser, ActionType.ForumGreater_3);
+				if(errorString!=null && errorString.trim().length()>0){
+					appLog.error("forum/post/control, errorString:" + errorString);
+					return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, errorString);
+				}
+				postDAO.updatePostClass_AdminManage(type, postId);
+				mochaLogDAO.insert("forum_postlist", postId, cur_uid, "update PostClass to :" + type);
+				User postAuthorUser = userDAO.getUser(postInfo.getAuthorUserID());
+				if(type == 1){
+					// 帖子被加精,奖励作者抹茶币,并发送消息提醒;
+					MochaBillModel mochaBill = mochaBillService.getMochaBill(postAuthorUser, 
+							AppConstants.MochaValueType.FORUM_POST_JIAJING);
+					if(mochaBill != null){
+						boolean flag = messageService.doPostJiaJing(postAuthorUser, postId, 
+								mochaBill.getActionValue(), postInfo.getTitle());
+						appLog.info("forum/post/control, messageService.doPostJiaJing:"+flag);
+					}
+				} else if (type == 2){
+					// 帖子被置顶,奖励作者抹茶币,并发送消息提醒;
+					MochaBillModel mochaBill = mochaBillService.getMochaBill(postAuthorUser, 
+							AppConstants.MochaValueType.FORUM_POST_ZHIDING);
+					if(mochaBill != null){
+						boolean flag = messageService.doPostZhiDing(postAuthorUser, postId, 
+								mochaBill.getActionValue(), postInfo.getTitle());
+						appLog.info("forum/post/control ,messageService.doPostZhiDing:"+flag);
+					}
+				}  
+			} else if(type == -1){
+				// V4.0.0 启用新的权限规则控制20140822
+				String errorString = privilegeService.validate(validateuser, ActionType.ForumSection_2);
+				// v4.6 新规则，如果有4-6级，是有删除权限的
+				boolean hasDeletePrivilege = PrivilegeLevelService.hasPrivilege(PrivilegeLevelService.LevelActionType.Forum_Block_3,validateuser);
+				boolean isAuthor = validateuser.getId()==postInfo.getAuthorUserID();
+				hasDeletePrivilege = isAuthor && hasDeletePrivilege;
+				if(errorString!=null && errorString.trim().length()>0 && !hasDeletePrivilege){
+					appLog.error("forum/post/control, errorString:" + errorString);
+					return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, errorString);
+				}
+				//-1删除, 将isValid改为0
+				postDAO.updatePostISValid_AdminManage(0, postId);
+				mochaLogDAO.insert("forum_postlist", postId, cur_uid, "update ISValid to 0");
+				User postAuthorUser = userDAO.getUser(postInfo.getAuthorUserID());
+				boolean flag = messageService.doPostDelete(postAuthorUser, postInfo.getTitle(), postId);
+				appLog.info("forum/post/control, messageService.doPostDelete:"+flag);
+				// V2.2 新增需求, 如果用户在论坛三次被禁,则锁;
+//				boolean isUserLocked = deviceBlockService.tryLockUser(postAuthorUser);
+//				appLog.info("forum/post/control, deviceBlockService.isUserLocked:"+isUserLocked);
+				// V3.1 新增需求, 如果帖子被锁, 则删除此贴中的关注动态信息;
+				forumUserPostRelationDAO.updateISValidNot_PostActive(postId);
+			}  else if(type == -2){  // V4.3.0,添加到热榜;
+				String errorString = privilegeService.validate(validateuser, ActionType.ForumGreater_3);
+				if(errorString!=null && errorString.trim().length()>0){
+					appLog.error("forum/post/control, errorString:" + errorString);
+					return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, errorString);
+				}
+				if(postInfo.getPostClass() == 5){
+					appLog.error("forum/post/control, PostClass:5");
+					return RequestUtil.error(StatusCode.INPUT_PARAM_ERROR, "此贴已是热榜贴!");
+				}
+				postDAO.insertHot(postId);
+				postDAO.updatePostClass_hot(postId);
+				mochaLogDAO.insert("forum_postlist_hot", postId, cur_uid, "insert hot");
+			} else {
+				appLog.error("forum/post/control, NOT found validate type :" + type);
+				return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND);
+			}
+    		//更新solr索引
+    		SolrSearchService.buildIndex(SolrIndexType.POST, true);
+    		PostControlModel model = new PostControlModel();
+			model.setPostId(postId);
+			model.setStatus(type);
+			return RequestUtil.succ(model);
+    	} catch(Exception e){
+    		e.printStackTrace();
+        	Log4jUtil.exception(e);
+    	}
+    	return RequestUtil.error(StatusCode.INTERNET_BUSY);
+    }
+
+    /**
+     * 帖子加赞;此URI是论坛中帖子加赞接口。(取消赞也用此接口)
+     * {"cur_uid":70402, "accountId":"1272239025", "postId":908514, "value":true}
+     * @author Liux
+     */
+    @Post("like")
+    public Object like(final Invocation inv, @Param("data") final String data){
+    	final int cur_uid;
+    	final int postId;
+    	final String accountId;
+    	final boolean isLike;
+    	try{
+    		// 1. 接收数据
+    		final JSONObject json = new JSONObject(data);
+    		cur_uid = json.optInt("cur_uid");
+    		accountId = json.optString("accountId");
+    		postId = json.optInt("postId");
+    		isLike = json.optBoolean("value");
+    		appLog.info("forum/post/like, postId:" + postId + ",cur_uid:" + cur_uid + "isLike:" + isLike);
+    		// 2. 验证用户是否合法;
+    		long time1 = System.currentTimeMillis();
+    		if(cur_uid==0 || accountId==null || accountId.trim().length()==0){ 
+    			appLog.info("forum/post/like, NOT found validate userid:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_NOT_FOUND);
+    		} 
+    		User doTopUser = userDAO.getValidatedUser(cur_uid, accountId);
+    		if( doTopUser==null || doTopUser.getId()==0 || doTopUser.getIsTempUser()==1){
+    			appLog.info("forum/post/like, NOT found validate userid:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_NOT_FOUND);
+    		} else if (doTopUser.getIsLocked()==1){
+				appLog.error("forum/post/like, user locked:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_IS_LOCKED);
+    		}
+    	    // 3.1 判断用户的设备合法性;
+			Integer isValidObj = appDeviceDAO.getISValid(doTopUser.getDeviceID());
+			if(isValidObj==null || (isValidObj!=null && isValidObj.intValue()==0)){
+				appLog.warn("forum/post/like, device is locked:"+doTopUser.getDeviceID());
+				return RequestUtil.error(StatusCode.DEVICE_IS_LOCKED);
+			}
+    		// #. 验证帖子合法性;
+    		PostInfoModel postInfo = this.postDAO.getInfo(postId);
+    		if(postInfo == null){
+    			appLog.info("forum/post/like, NOT found validate PostListID:" + postId);
+    			return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND);
+    		}
+    		// 3. 取得是否存在原顶和数据库顶的次数;
+    		Integer ifLikeed = postLikeAction.getIfLike(postId, cur_uid);
+    		Integer likeCount = postLikeAction.getPostLikeCount(postId);
+    		appLog.info("forum/post/like, ifLikeed:" + ifLikeed+", likeCount:"+likeCount);
+    		TopDownModel model = new TopDownModel();
+    		// 4. 比较 "顶" 和 "数据库是否已经顶过".
+    		if(isLike && ifLikeed != null){
+    			model.setStatus(true);
+    			model.setCount(likeCount);
+    			appLog.info("forum/post/like, isLike && ifLikeed != null");
+    		} else if (isLike && ifLikeed ==null){
+    			this.postLikeAction.insert(postId, cur_uid);
+    			this.postDAO.updateLikeCount(likeCount+1, postId);
+    			model.setStatus(true);
+    			model.setCount(likeCount+1);
+    			// 自己顶自己的帖子不奖励抹茶币;
+    			if(cur_uid != postInfo.getAuthorUserID()){
+    				User postAuthorUser = userDAO.getUser(postInfo.getAuthorUserID());
+    				int mochaValue = 0;
+        			MochaBillModel mochaBill = mochaBillService.getMochaBill(postAuthorUser, 
+        					AppConstants.MochaValueType.FORUM_POST_TOPED);
+        			if(mochaBill != null){
+        				mochaValue = mochaBill.getActionValue();
+        			} 
+        			boolean flag = messageService.doPostToped(postAuthorUser, 
+    						doTopUser, postInfo.getId(), mochaValue, postInfo.getTitle());
+    				appLog.info("forum/post/like, doPostToped send msg:"+flag+",mochaValue:"+mochaValue);
+    			} else {
+    				appLog.info("forum/post/like, cur_uid=PostAuthorUserID, not add mochaBill.");
+    			}
+    			appLog.info("forum/post/like, isLike && ifLikeed ==null");
+            	// 4.1 成功赞贴后，insert Forum_UserPost_Relation
+            	userPostRelationDAO.insert(cur_uid, postId, 0, postInfo.getTitle(), 
+            			"赞了《POST-TITLE》".replace("POST-TITLE", postInfo.getTitle()), 
+            			null, ForumUserPostRelationModel.TYPE_LIKE_POST,1);
+    		} else if (!isLike && ifLikeed != null){
+    			this.postLikeAction.delete(postId, cur_uid);
+    			this.postDAO.updateLikeCount(likeCount-1, postId);
+    			model.setStatus(false);
+    			model.setCount(likeCount-1);
+    			appLog.info("forum/post/like, !isLike && ifLikeed != null");
+    		} else if(!isLike && ifLikeed == null){
+    			model.setStatus(false);
+    			model.setCount(likeCount);
+    			appLog.info("forum/post/like, !isLike && ifLikeed == null");
+    		}
+    		appLog.info("forum/post/like, status:"+model.isStatus()+",count:"+model.getCount());
+    		long time2 = System.currentTimeMillis();
+    		pfmLog.info("forum/post/like, time: "+(time2-time1));
+    		return RequestUtil.succ(model);
+    	} catch(Exception e) {
+    		e.printStackTrace();
+        	Log4jUtil.exception(e);
+    	}
+    	return RequestUtil.error(StatusCode.INTERNET_BUSY);
+    }
+    
+    /**
+     * 收藏帖子; (取消赞也用此接口)
+     * {"cur_uid":70402, "accountId":"1272239025", "postId":908514, "value":true}
+     * @since 2.3
+     */
+    @Post("collect")
+    public Object collect(final Invocation inv, @Param("data") final String data){
+    	final int cur_uid;
+    	final int postId;
+    	final String accountId;
+    	final boolean isCollect;
+    	try{
+    		// 1. 接收数据
+    		final JSONObject json = new JSONObject(data);
+    		cur_uid = json.optInt("cur_uid");
+    		accountId = json.optString("accountId");
+    		postId = json.optInt("postId");
+    		isCollect = json.optBoolean("value");
+    		appLog.info("forum/post/collect, postId:" + postId + ",cur_uid:" + cur_uid + "isCollect:" + isCollect);
+    		// 2. 验证用户是否合法;
+    		long time1 = System.currentTimeMillis();
+    		if(cur_uid==0 || accountId==null || accountId.trim().length()==0){ 
+    			appLog.info("forum/post/like, NOT found validate userid:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_NOT_FOUND);
+    		} 
+    		User collectUser = userDAO.getValidatedUser(cur_uid, accountId);
+    		if( collectUser==null || collectUser.getId()==0 || collectUser.getIsTempUser()==1){
+    			appLog.info("forum/post/collect, NOT found validate userid:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_NOT_FOUND);
+    		} else if (collectUser.getIsLocked()==1){
+				appLog.error("forum/post/collect, user locked:"+cur_uid);
+    			return RequestUtil.error(StatusCode.USER_IS_LOCKED);
+    		}
+    	    // 3.1 判断用户的设备合法性;
+			Integer isValidObj = appDeviceDAO.getISValid(collectUser.getDeviceID());
+			if(isValidObj==null || (isValidObj!=null && isValidObj.intValue()==0)){
+				appLog.warn("forum/post/collect, device is locked:"+collectUser.getDeviceID());
+				return RequestUtil.error(StatusCode.DEVICE_IS_LOCKED);
+			}
+    		// #. 验证帖子合法性;
+			PostInfoModel postInfo = postDAO.getInfo(postId);
+    		if(postInfo==null || postInfo.getId()<=0){
+    			appLog.info("forum/post/collect, NOT found validate PostListID:" + postId);
+    			return RequestUtil.error(StatusCode.RESOURCE_NOT_FOUND);
+    		}
+    		// 3. 取得是否存在原收藏;
+    		Integer ifCollected = postCollectDAO.getIfCollect(cur_uid, postId);
+    		appLog.info("forum/post/collect, ifCollected:" + ifCollected);
+    		// 4. 比较 "收藏" 和 "数据库是否已经收藏过".
+    		if(isCollect && ifCollected != null){
+    			appLog.info("forum/post/collect, isCollect && ifCollected != null");
+    		} else if (isCollect && ifCollected==null){
+    			postCollectDAO.insert(cur_uid, postId);
+    			// postDAO.updateCollectCount(collectCount+1, postId);
+    			if(cur_uid != postInfo.getAuthorUserID()){
+    				// 添加发消息;
+    				User postAuthorUser = userDAO.getUser(postInfo.getAuthorUserID());
+    				boolean flag = messageService.doPostCollected(postAuthorUser, collectUser, postId, postInfo.getTitle());
+    				appLog.info("forum/post/collect, post author send msg:"+flag);
+    			} else {
+    				appLog.info("forum/post/collect, cur_uid=PostAuthorUserID, not send msg.");
+    			}
+    			appLog.info("forum/post/collect, isCollect && ifCollected ==null");
+    		} else if (!isCollect && ifCollected!=null){
+    			postCollectDAO.delete(postId, cur_uid);
+    			appLog.info("forum/post/collect, !isCollect && ifCollected != null");
+    		} else if(!isCollect && ifCollected==null){
+    			appLog.info("forum/post/collect, !isCollect && ifCollected == null");
+    		}
+    		long time2 = System.currentTimeMillis();
+    		pfmLog.info("forum/post/collect, time: "+(time2-time1));
+    		return RequestUtil.succ();
+    	} catch(Exception e) {
+    		e.printStackTrace();
+        	Log4jUtil.exception(e);
+    	}
+    	return RequestUtil.error(StatusCode.INTERNET_BUSY);
+    }
+    
+    /***
+     * 帖子搜索;
+     * {"searchKey":"马上有范", "beginIndex":9, "length":10, "cur_uid":70402}
+     */
+    @Post("search")
+    public Object search(final Invocation inv, @Param("data") final String data, 
+    		@Param("device") final String device) {
+    	final int cur_uid;
+    	final int beginIndex;
+    	final int length;
+		final String searchKey;
+        try {
+        	// 1. 接收数据
+			final JSONObject json = new JSONObject(data);
+			cur_uid = json.optInt("cur_uid");
+			beginIndex = json.optInt("beginIndex");
+			length = json.optInt("length");
+			searchKey = json.optString("searchKey");
+			appLog.info("forum/post/search, cur_uid:"+cur_uid+", searchKey:"+searchKey);
+			// 2. 插入搜索历史;
+			long time1 = System.currentTimeMillis();
+			if(beginIndex == 0){
+				searchKeyHistoryDAO.insert(cur_uid, searchKey, SolrIndexType.POST);
+			}
+			// 3. 搜索库查询List;
+			List<PostListModel> resultPostList = solrSearchService.getPostList(searchKey, beginIndex, length);
+			if(resultPostList==null || resultPostList.size()==0){
+				appLog.info("forum/post/search, return null");
+				return RequestUtil.succ(resultPostList);
+			}
+			final double appVersion = AppUtil.getAppVersion(device);
+			// 7. 为所有的resultList,查询出PostListModel中的authorUser,和changeUserName
+			int postsNum = 0;
+			if(resultPostList!=null && resultPostList.size()>0){
+				postsNum = resultPostList.size();
+				// 7.1  查询出帖子作者ID的人员;
+				List<Integer> authorIDList = PostListModel.getAuthorUserIDList(resultPostList);
+				List<UserForumSectionModel> authorList = userDAO.getForumAuthorUserList(authorIDList);
+				Map<Integer,UserForumSectionModel> authorUserMap = UserForumSectionModel.getMap(authorList);
+				// 7.2  查询出帖子回帖的人员;
+				List<Integer> changeUserIDList = PostListModel.getChangeUserIDList(resultPostList);
+				List<UserForumSectionModel> changeUserList = userDAO.getForumChangeUserList(changeUserIDList);
+				Map<Integer,UserForumSectionModel> changeUserMap = UserForumSectionModel.getMap(changeUserList);
+				// 7.3  循环resultList列表中的PostListModel; setAuthorUser和setChangeUserName
+				for(PostListModel postModel: resultPostList){ 
+					if(postModel != null){ 
+						// 7.4  设置authorUserModel
+						UserForumSectionModel authorUserModel = authorUserMap.get(postModel.getAuthorUserID());
+						postModel.setAuthorUser(authorUserModel);
+						// 7.4  设置changeUserName
+						String changeUserName = "";
+						UserForumSectionModel changeUserModel = changeUserMap.get(postModel.getChangeUserID());
+						if(changeUserModel != null){
+							changeUserName = changeUserModel.getUserName();
+						}
+						postModel.setChangeUserName(changeUserName);
+						/** V3.1 针对帖子的列表查询4张图片**/
+						if(appVersion>=3.1 && (postModel.getIsPicIn()==1 || postModel.getIsProductIn()==1 
+								|| postModel.getIsVideoIn()==1)){
+							List<String> picUrl4List = postDataDAO.getPostPicUrlList(postModel.getId(), 4, 
+									AppConstants.PIC_PRODUCT_DEFAULT, AppConstants.PIC_VIDEO_DEFAULT);
+							postModel.setPicUrlList(picUrl4List);
+						}
+					}
+				}
+				appLog.info("forum/post/search, success set authorUserModel & changeUserName.");
+			}
+			// 8. 设置;返回;
+			long time2 = System.currentTimeMillis();
+			appLog.info("forum/post/search, succ search all posts num:"+postsNum);
+			pfmLog.info("forum/post/search, succ all time:"+(time2-time1));
+    		return RequestUtil.succ(appVersion, resultPostList);
+        } catch (Exception exp){
+        	exp.printStackTrace();
+        	Log4jUtil.exception(exp);
+        }
+        return RequestUtil.error(StatusCode.INTERNET_BUSY);
+    }
+}
