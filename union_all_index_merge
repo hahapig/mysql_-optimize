@@ -1,0 +1,48 @@
+首先表定义如下：
+CREATE TABLE `user_mochavalue_history` (
+  `ID` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `UserID` int(10) unsigned NOT NULL DEFAULT '0',
+  `FromType` tinyint(3) unsigned NOT NULL DEFAULT '1',
+  `TaskID` tinyint(3) unsigned NOT NULL DEFAULT '0',
+  `PreMochaValue` int(10) unsigned NOT NULL DEFAULT '0',
+  `DoMochaValue` int(11) NOT NULL DEFAULT '0',
+  `Content` varchar(50) DEFAULT NULL COMMENT '抹茶值变化说明',
+  `CreateTime` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',
+  PRIMARY KEY (`ID`),
+  KEY `Index_UserID` (`UserID`),
+  KEY `Index_TaskID` (`TaskID`)
+) ENGINE=InnoDB AUTO_INCREMENT=5434 DEFAULT CHARSET=utf8 COMMENT='用户抹茶值变化历史表'
+
+
+No1.SELECT * FROM user_mochavalue_history umh WHERE  umh.UserID=68554  AND umh.TaskID =4;-- 68554
+在这条语句中，我们可以看到索引合并（表现为：type中出现index_merge，extra列中出现intersect等，参考http://dev.mysql.com/doc/refman/5.5/en/index-merge-optimization.html）
+
+再来说说这条查询会因为参数数据的不同而执行计划不同
+    1.当用一个不存在的UserID去查询的时候，执行计划会直接使用Index_UserID，并判断出可能的行为1（实际没有），此时不会使用索引Index_TaskID
+    2.当使用一个存在的userID去查询，如果存在taskID（不一定和userID对应）存在，使用索引合并。没有taskID，传的值为负数，也使用索引合并，否则不使用此时不会使用索引Index_TaskID（这表现很诡异）
+
+No2.SELECT * FROM user_mochavalue_history umh WHERE  umh.UserID=68554  AND umh.TaskID in(0,1,2,3,4);-- 68554
+这条语句的执行计划就只会用Index_UserID索引，因为后面的TaskID用了in条件，导致不能使用索引合并。如果去掉UserID条件也不能使用索引Index_TaskID，除非taskID的in里面只有两个或者一个值。
+
+
+来对比 No1和No2的执行效率
+当对同一个用户有多个taskID的值查询时，我们采用了UNION  ALL，来诱导数据库使用索引合并的方式查询，来提高查询效率
+如下：
+    优化：
+    SELECT * FROM user_mochavalue_history umh WHERE  umh.UserID=68554  AND umh.TaskID =0-- 68554
+    UNION  ALL
+    SELECT * FROM user_mochavalue_history umh WHERE  umh.UserID=68554  AND umh.TaskID =1-- 68554
+    UNION  ALL
+    SELECT * FROM user_mochavalue_history umh WHERE  umh.UserID=68554  AND umh.TaskID =2-- 68554
+    UNION  ALL
+    SELECT * FROM user_mochavalue_history umh WHERE  umh.UserID=68554  AND umh.TaskID =3-- 68554
+    没有优化：
+    SELECT * FROM user_mochavalue_history umh WHERE  umh.UserID=68554  AND umh.TaskID in (0,1,2,3)-- 68554
+多次执行发现，两个执行速度只相差1到2毫秒（优化的更快，20ms左右）。数据总量为3222445 300万的数据量。这里有一个问题就是TaskID本身取值并不多(20个左右)，如果TaskID取值很多，我相信会有明显的效果。
+
+
+
+
+
+
+
