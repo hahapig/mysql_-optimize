@@ -1,0 +1,44 @@
+set -e ### 主要用于命令出错就马上退出
+TOMCAT_HOME='/home/web/tomcat7-4-mochaweb'
+TOMCAT_PROCESS=`jps|grep "RemoteMavenServer"`
+DEPLOY_DIR='/home/web/deployment/mochaweb/WEB-INF/classes/'
+read -n1 -p "upload com.zip,then press any key to continue..."
+ZIP_FILE="$DEPLOY_DIR/com.zip"
+if test -f "$ZIP_FILE";then 
+	echo 'com.zip exist,continue...'
+else
+	echo 'com.zip doesnt existed,exit...'
+	exit
+fi
+###########################
+echo "deploy_dir>>>>>>>>>>>>$DEPLOY_DIR"
+echo "tomcat_home>>>>>>>>>>>>$TOMCAT_HOME"
+echo "tomcat_process>>>>>>>>>>>>$TOMCAT_PROCESS"
+########################### tomcat停止
+echo 'stop tomcat....'
+sh $TOMCAT_HOME/bin/shutdown.sh
+TOMCAT_PROCESS=`jps|grep "RemoteMavenServers"`
+if test -n "$TOMCAT_PROCESS"; then
+	echo "TOMCAT_PROCESS 停止失败,进程信息:$TOMCAT_PROCESS"
+	echo 'TOMCAT_PROCESS 停止失败,停止执行脚本'
+	exit
+else
+	echo 'TOMCAT_PROCESS 成功停止'
+fi
+####################### 日志删除
+echo '开始删除日志'
+echo 'cd ~/tomcat7-4-mochaweb/mochaLogs/ '
+cd $TOMCAT_HOME/mochaLogs/
+echo 'rm -rf *'
+rm -rf *
+echo 'cd ~/tomcat7-4-mochaweb/work/Catalina/localhost/'
+cd $TOMCAT_HOME/work/Catalina/localhost/
+rm -rf *
+echo 'cd ~/deployment/mochaweb/WEB-INF/classes/'
+cd $DEPLOY_DIR
+echo 'rm  -rf com/'
+rm  -rf com/
+unzip com.zip
+rm  -rf com.zip
+echo 'start tomcat ....'
+sh $TOMCAT_HOME/bin/startup.sh 
