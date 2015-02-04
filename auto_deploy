@@ -1,4 +1,4 @@
-set -e ### 主要用于命令出错就马上退出
+set -e
 TOMCAT_HOME='/home/web/tomcat7-4-mochaweb'
 TOMCAT_PROCESS=`jps|grep "RemoteMavenServer"`
 DEPLOY_DIR='/home/web/deployment/mochaweb/WEB-INF/classes/'
@@ -28,17 +28,27 @@ fi
 ####################### 日志删除
 echo '开始删除日志'
 echo 'cd ~/tomcat7-4-mochaweb/mochaLogs/ '
-cd $TOMCAT_HOME/mochaLogs/
-echo 'rm -rf *'
-rm -rf *
+cd $TOMCAT_HOME
+echo 'rm -rf mochaLogs/'
+rm -rf mochaLogs/
+##########删除tomcat的工作目录
 echo 'cd ~/tomcat7-4-mochaweb/work/Catalina/localhost/'
-cd $TOMCAT_HOME/work/Catalina/localhost/
-rm -rf *
+cd $TOMCAT_HOME/work/Catalina
+rm -rf localhost/
+##############删除原有编译文件
 echo 'cd ~/deployment/mochaweb/WEB-INF/classes/'
 cd $DEPLOY_DIR
 echo 'rm  -rf com/'
 rm  -rf com/
+########解压zip包
 unzip com.zip
+##########删除zip包
 rm  -rf com.zip
+#########开启tomcat
 echo 'start tomcat ....'
 sh $TOMCAT_HOME/bin/startup.sh 
+########## 读取访问日志
+jps
+read -n1 -p "wait some time,press any key to stout..."
+tail -f $TOMCAT_HOME/mochaLogs/app.log
+
